@@ -3,7 +3,7 @@ import { Data, TagoContext } from "@tago-io/sdk/lib/types";
 import { time } from "console";
 import mqtt from 'mqtt';
 // Configurações do broker
-const brokerUrl = 'mqtt://34.67.184.199:1883';
+const brokerUrl = 'mqtt://34.58.177.51:1883';
 const clientId = 'publisher-client';
 
 async function sendCommand(context: TagoContext, scope: Data[]) {

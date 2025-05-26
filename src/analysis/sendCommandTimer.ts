@@ -17,7 +17,7 @@ import { Analysis, Resources } from "@tago-io/sdk";
 import { Data, TagoContext } from "@tago-io/sdk/lib/types";
 import mqtt from 'mqtt';
 // Configurações do broker
-const brokerUrl = 'mqtt://34.41.11.128:1883';
+const brokerUrl = 'mqtt://34.58.177.51:1883';
 const clientId = 'publisher-client';
 
 

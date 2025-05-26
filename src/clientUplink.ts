@@ -9,7 +9,7 @@
 import mqtt from 'mqtt';
 import { sendDataToTago } from './function/sendDataToTago';
 
-const brokerUrl = 'mqtt://34.67.184.199:1883'; 
+const brokerUrl = 'mqtt://34.58.177.51:1883'; 
 const topic = 'uplink'; 
 
 // Conectando ao broker
