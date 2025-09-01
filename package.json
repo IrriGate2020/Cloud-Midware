@@ -1,0 +1,21 @@
+{
+  "name": "cloud-midware",
+  "version": "1.0.0",
+  "description": "Middleware for IrriGate2020 Cloud integration.",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/clientUplink.ts",
+    "test": "echo \"No test specified\" && exit 0"
+  },
+  "author": "IrriGate2020",
+  "license": "MIT",
+  "dependencies": {
+    "@tago-io/sdk": "10.10.0",
+    "axios": "^1.6.0",
+    "mqtt": "^5.14.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

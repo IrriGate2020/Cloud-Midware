@@ -12,4 +12,4 @@ COPY . .
 
 EXPOSE 1883
 
-CMD ["npm","run","start-broker", "start-clientUplink"]
+CMD ["npm","run","start-broker", "start-clientUplink", "start"]
