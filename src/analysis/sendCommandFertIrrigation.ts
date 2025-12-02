@@ -24,8 +24,6 @@
 
   6. **Tratamento de erros**:
      - Em caso de erro ao conectar ao broker ou ao publicar a mensagem, o erro é registrado no console e a conexão com o broker é encerrada de maneira segura.
-
-  Esse fluxo permite o controle remoto das soluções de fertilização, configurando-as dinamicamente com base nas variáveis definidas pela análise.
 */
 
 

@@ -53,8 +53,9 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
     const resources = new Resources({ token: token });
     for (const data of scope) {
         console.log(data.id);
+        console.log(data.group);
         const device = await Utils.getDevice(account, device_id);
-        const dataDeleted = await device.deleteData({ groups: data.group, start_date: data.time, end_date: data.time });
+        const dataDeleted = await device.deleteData({ groups: data.group, qty: 9999 });
         console.debug(dataDeleted);
     }
     const device_info = await resources.devices.info(device_id);
@@ -85,8 +86,9 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
         console.error('Erro de conexão:', err);
     });
 
+    return;
 
 }
 
 export { sendCommand };
-export default new Analysis(sendCommand, { token: "a-875abfb4-cb4e-4e9f-ae4d-31c172c9c565" });
+export default new Analysis(sendCommand, { token: "a-541de983-d337-4dd5-bb0c-74801ebf61fc" });

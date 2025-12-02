@@ -4,7 +4,7 @@
 
 // O fluxo do código é o seguinte:
 // 1. **Coleta de dados do escopo**: A função começa coletando dados de variáveis passadas para o contexto, como os dias da semana, a hora de irrigação, as saídas ativadas, e a duração para cada uma das saídas. Ela também prepara um array de configurações semanais, convertendo valores booleanos para 1 ou 0, e também os tempos de duração (minutos e segundos) para cada saída.
-  
+
 // 2. **Configuração do MQTT**: O código configura um cliente MQTT com as informações do broker fornecidas (o IP e a porta do broker MQTT). Ele se conecta ao broker e, uma vez conectado, prepara uma mensagem que será publicada no tópico "downlink".
 
 // 3. **Estrutura da mensagem**: A mensagem publicada contém informações como o número de série do dispositivo (`SN`), o número do timer, as saídas ativadas, os horários de irrigação e as durações. A mensagem é construída com base nas variáveis de configuração coletadas anteriormente e em um formato específico para ser entendida pelo dispositivo.
@@ -32,6 +32,8 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
     const enable = scope.find((x) => x.variable === "enable")?.value;
     const irrigation_hour = scope.find((x) => x.variable === "irrigation_hour")?.value;
     const trueOutputs = [] as any;
+    const minutesArray = [] as number[];
+    const secondsArray = [] as number[];
     for (let i = 1; i <= 32; i++) {
         const output = scope.find((x) => x.variable === `output${i}`)?.value;
         if (output !== true) {
@@ -40,17 +42,19 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
         trueOutputs.push(i);
     }
 
-    const minutesArray = [] as number[];
-    const secondsArray = [] as number[];
-
     for (let i = 1; i <= 32; i++) {
         const duration = scope.find((x) => x.variable === `duration_${i}`)?.value as any;
         const output = scope.find((x) => x.variable === `output${i}`)?.value;
-        if (!duration || !/^(\d{2}):(\d{2})$/.test(duration) || !output) {
+        if (!output) {
             continue;
         }
 
-        const [minutes, seconds] = duration.split(':').map(Number);
+        let minutes = 0;
+        let seconds = 0;
+        if (duration) {
+            [minutes, seconds] = duration.split(':').map(Number);
+        }
+
         minutesArray.push(minutes);
         secondsArray.push(seconds);
     }
@@ -140,4 +144,4 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
 }
 
 export { sendCommand };
-export default new Analysis(sendCommand, { token: "a-d739f6ca-2ecf-4487-b389-4d33411da0ac" });
+export default new Analysis(sendCommand, { token: "a-02609b27-88ad-4d0d-9b49-9f1c8285cb5c" });

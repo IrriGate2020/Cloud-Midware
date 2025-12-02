@@ -8,6 +8,18 @@ function toTagoFormat(value) {
     },
   ];
 
+  // Função para converter minutos em formato "hh:mm"
+  const convertToTimeFormat = (minutes) => {
+    if (typeof minutes === 'string' && minutes.includes(':')) {
+      // Já está no formato "hh:mm"
+      return minutes;
+    }
+    const mins = Number(minutes);
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return `${String(hours).padStart(2, '0')}:${String(remainingMins).padStart(2, '0')}`;
+  };
+
   const fields = [
     "MOD",
     "EN",
@@ -38,7 +50,12 @@ function toTagoFormat(value) {
 
   fields.forEach((field) => {
     if (jsonObj.hasOwnProperty(field)) {
-      data[0].metadata[field] = Number(jsonObj[field]);
+      // DMaMi e IMiMi devem estar no formato string "hh:mm"
+      if (["DMaMi", "IMiMi"].includes(field)) {
+        data[0].metadata[field] = convertToTimeFormat(jsonObj[field]);
+      } else {
+        data[0].metadata[field] = Number(jsonObj[field]);
+      }
     }
     if (
       ["OBJ", "LIM", "DMaMi", "IMiMi"].includes(field) &&
@@ -46,7 +63,8 @@ function toTagoFormat(value) {
     ) {
       data.push({
         variable: field,
-        value: Number(jsonObj[field]),
+        // DMaMi e IMiMi devem estar no formato string "hh:mm"
+        value: ["DMaMi", "IMiMi"].includes(field) ? convertToTimeFormat(jsonObj[field]) : Number(jsonObj[field]),
       });
     }
   });
@@ -87,4 +105,4 @@ if (payload_raw) {
   }
 }
 
-//console.log(payload);
+// console.log(payload);

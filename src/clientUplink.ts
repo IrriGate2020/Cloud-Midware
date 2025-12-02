@@ -9,8 +9,8 @@
 import mqtt from 'mqtt';
 import { sendDataToTago } from './function/sendDataToTago';
 
-const brokerUrl = 'mqtt://34.58.177.51:1883';
-const topic = 'uplink';
+const brokerUrl = 'mqtt://34.58.177.51:1883'; 
+const topic = 'uplink'; 
 
 // Conectando ao broker
 const client = mqtt.connect(brokerUrl);
@@ -30,13 +30,8 @@ client.on('connect', () => {
 
 // Evento quando uma mensagem é recebida
 client.on('message', (topic, message) => {
-    try {
-        console.log(`Mensagem recebida no tópico ${topic}: ${message.toString()}`);
-        sendDataToTago(message);
-    } catch (error) {
-        console.log(error)
-    }
-
+    console.log(`Mensagem recebida no tópico ${topic}: ${message.toString()}`);
+    sendDataToTago(message);
 });
 
 // Evento de erro

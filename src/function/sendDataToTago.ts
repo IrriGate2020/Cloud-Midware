@@ -16,23 +16,12 @@ import { Console } from "console";
 
 function mergeArraysWithIdAndTime(firstArray: any, secondArray: any) {
   const currentTime = new Date().toISOString();
-  firstArray.forEach((item: { variable: any; id: any; time: string }) => {
-    const correspondingItem = secondArray.find(
-      (secondItem: { variable: any }) => secondItem.variable === item.variable
-    );
 
-    if (correspondingItem) {
-      item.id = correspondingItem.id;
-      item.time = currentTime;
-    }
-  });
-  // Filtrar para remover o item que tem a variável 'payload' e itens sem 'id'
-  const filteredArray = firstArray.filter(
-    (item: { variable: string; id: any }) =>
-      item.variable !== "payload" && item.id
-  );
-
-  return filteredArray;
+  return firstArray.map((item: { variable: string; value: any }) => ({
+    variable: item.variable,
+    value: item.value,
+    time: currentTime,
+  }));
 }
 
 async function sendDataToTago(data: any) {
@@ -60,14 +49,85 @@ async function sendDataToTago(data: any) {
     if (!device) {
       return console.log(`Device not found, Serial Number: ${serialNumber}`);
     }
-    //Sending the data to the device
-    await device
-      .sendData({
+
+    const sensorConfig = sensorData[Number(sensorNumber)];
+    const group = new Date().toISOString();
+
+    // monta dados do sensor nesse group (sem apagar históricos)
+    const sensorBase: any[] = [
+      {
         variable: "payload",
-        value: JSON.stringify(sensorData[Number(sensorNumber)]),
-      })
-      .then(console.log)
-      .catch(console.error);
+        value: JSON.stringify(sensorConfig),
+        group,
+      },
+    ];
+
+    // exemplo: habilitado / alvo / limite / tempos máximos e de irrigação
+    if (typeof sensorConfig?.EN !== "undefined") {
+      sensorBase.push({
+        variable: "sens_enable",
+        value: sensorConfig.EN ? "Sim" : "Não",
+        group,
+      });
+    }
+    if (typeof sensorConfig?.OBJ !== "undefined") {
+      sensorBase.push({ variable: "obj", value: sensorConfig.OBJ, group });
+    }
+    if (typeof sensorConfig?.LIM !== "undefined") {
+      sensorBase.push({ variable: "lim", value: sensorConfig.LIM, group });
+    }
+
+    // tempos configurados em variáveis separadas
+    if (typeof sensorConfig?.DMaHh !== "undefined" || typeof sensorConfig?.DMaMi !== "undefined") {
+      sensorBase.push({
+        variable: "dma",
+        value: `${String(sensorConfig.DMaHh || 0).padStart(2, "0")}:${String(
+          sensorConfig.DMaMi || 0
+        ).padStart(2, "0")}`,
+        group,
+      });
+    }
+
+    if (typeof sensorConfig?.IMiHh !== "undefined" || typeof sensorConfig?.IMiMi !== "undefined") {
+      sensorBase.push({
+        variable: "imi",
+        value: `${String(sensorConfig.IMiHh || 0).padStart(2, "0")}:${String(
+          sensorConfig.IMiMi || 0
+        ).padStart(2, "0")}`,
+        group,
+      });
+    }
+
+    if (typeof sensorConfig?.WTinih !== "undefined" || typeof sensorConfig?.WTinim !== "undefined") {
+      sensorBase.push({
+        variable: "wtini",
+        value: `${String(sensorConfig.WTinih || 0).padStart(2, "0")}:${String(
+          sensorConfig.WTinim || 0
+        ).padStart(2, "0")}`,
+        group,
+      });
+    }
+
+    if (typeof sensorConfig?.WTendh !== "undefined" || typeof sensorConfig?.WTendm !== "undefined") {
+      sensorBase.push({
+        variable: "wtend",
+        value: `${String(sensorConfig.WTendh || 0).padStart(2, "0")}:${String(
+          sensorConfig.WTendm || 0
+        ).padStart(2, "0")}`,
+        group,
+      });
+    }
+
+    if (typeof sensorConfig?.LTemp !== "undefined") {
+      sensorBase.push({ variable: "ltemp", value: sensorConfig.LTemp, group });
+    }
+
+    if (typeof sensorConfig?.LHum !== "undefined") {
+      sensorBase.push({ variable: "lhum", value: sensorConfig.LHum, group });
+    }
+
+    // Apenas insere novos dados com group único (ISO string), sem apagar históricos
+    await device.sendData(sensorBase).then(console.log).catch(console.error);
   }
 
   // for (const sensor in fertData) {
@@ -102,6 +162,11 @@ async function sendDataToTago(data: any) {
     const serialNumber = `${centralNumber}`;
     console.log(time);
 
+    // ignora campos que não são timers numéricos (ex: Active)
+    if (isNaN(Number(timeNumber))) {
+      continue;
+    }
+
     const token = await tago_server_udp
       .get_token(serialNumber)
       .catch((e: any) => {
@@ -116,29 +181,102 @@ async function sendDataToTago(data: any) {
       return console.log(`Device not found, Serial Number: ${serialNumber}`);
     }
 
-    const tagoData = parserTagoIo([
+    console.log(await device.info());
+    const timerConfig = timeData[Number(timeNumber)];
+
+    // define um group fixo para todos os dados deste timer
+    const group = `timer_${timeNumber}`;
+
+    // monta dados base: payload + timer_number, todos com o mesmo group
+    const baseData: any[] = [
       {
         variable: "payload",
-        value: JSON.stringify(timeData[Number(timeNumber)]),
+        value: JSON.stringify(timerConfig),
+        group,
       },
       {
         variable: "timer_number",
         value: timeNumber,
+        group,
       },
-    ]);
+    ];
+
+    // dias da semana (sem[0..6] => dom..sab)
+    const weekArray: number[] = timerConfig?.sem || [];
+    const weekVars = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"];
+    weekVars.forEach((dayVar, idx) => {
+      const flag = weekArray[idx] === 1;
+      baseData.push({
+        variable: dayVar,
+        value: flag,
+        group,
+      });
+    });
+
+    // enable e init_time derivados do timer
+    const enabled = timerConfig?.EN === 1;
+    const hh = String(timerConfig?.HhIni ?? 0).padStart(2, "0");
+    const mmInit = String(timerConfig?.MinIni ?? 0).padStart(2, "0");
+    const initTime = `${hh}:${mmInit}`;
+
+    baseData.push(
+      {
+        variable: "enable",
+        value: enabled ? "Sim" : "Nao",
+        group,
+      },
+      {
+        variable: "init_time",
+        value: initTime,
+        group,
+      }
+    );
+
+    // adiciona variáveis setX (saídas habilitadas) e duration_setor
+    const setArray: number[] = timerConfig?.SET || [];
+    const secArray: number[] = timerConfig?.ArrSecDu || [];
+    const minArray: number[] = timerConfig?.ArrMinDu || [];
+
+    setArray.forEach((sectorNumber: number, index: number) => {
+      // seta saída habilitada
+      baseData.push({
+        variable: `set${sectorNumber}`,
+        value: true,
+        group,
+      });
+
+      // duration associada a esse setor, usando o mesmo índice
+      const sec = secArray[index] || 0;
+      const min = minArray[index] || 0;
+
+      const mm = String(min).padStart(2, "0");
+      const ss = String(sec).padStart(2, "0");
+      const durationString = `${mm}:${ss}`;
+
+      baseData.push({
+        variable: `duration_${sectorNumber}`,
+        value: durationString,
+        group,
+      });
+    });
+
+    // procura qualquer dado deste timer pelo group específico
     const oldData = await device.getData({
-      variables: "timer_number",
-      values: timeNumber,
+      groups: group,
+      qty: 1,
     });
 
     if (oldData.length === 0) {
-      //Sending the data to the device
-      await device.sendData(tagoData).then(console.log).catch(console.error);
+      // Envia tudo como novo dado
+      await device.sendData(baseData).then(console.log).catch(console.error);
     } else {
-      const group = oldData[0].group;
-      const data = await device.getData({ groups: group, qty: 9999 });
-      const arrayResult = mergeArraysWithIdAndTime(tagoData, data);
-      await device.editData(arrayResult).then(console.log).catch(console.error);
+      // Apaga totalmente o grupo antigo (inclui duration_*, set*, etc.) e recria com dados atuais
+      await device
+        .deleteData({ groups: group, qty: 9999 })
+        .then(console.log)
+        .catch(console.error);
+
+      await device.sendData(baseData).then(console.log).catch(console.error);
     }
   }
 

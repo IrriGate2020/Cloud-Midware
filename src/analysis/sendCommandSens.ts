@@ -1,23 +1,23 @@
 // Este código implementa uma função chamada `sendCommand`, que é utilizada em uma análise (Analysis) na plataforma TagoIO para enviar comandos via MQTT para um dispositivo conectado, usando dados fornecidos pelo contexto da análise. A função interage com os dados de entrada e envia uma mensagem ao dispositivo, solicitando a execução de um comando de controle ou configuração.
 
- // A função segue este fluxo:
- // 1. **Coleta de dados do contexto**: 
- //    - A função começa coletando informações do dispositivo e do contexto fornecido pela análise. As variáveis do escopo são extraídas e usadas para configurar a mensagem a ser enviada. Isso inclui informações como permissões de comando (`command_has_permision`), limites (`lim`), e configurações de tempo para "DMa" e "IMi".
- //    - A função também verifica o número de série do dispositivo (`dev_eui`), que é extraído e processado para determinar um índice.
- 
- // 2. **Validação e processamento dos dados**:
- //    - A função valida o número de série (`serial_id`) e o índice extraído da string do número de série para garantir que ele seja válido.
- //    - Os valores para as variáveis de comando, como permissões, limites, e horários, são convertidos para números ou padrões apropriados caso não sejam encontrados.
+// A função segue este fluxo:
+// 1. **Coleta de dados do contexto**: 
+//    - A função começa coletando informações do dispositivo e do contexto fornecido pela análise. As variáveis do escopo são extraídas e usadas para configurar a mensagem a ser enviada. Isso inclui informações como permissões de comando (`command_has_permision`), limites (`lim`), e configurações de tempo para "DMa" e "IMi".
+//    - A função também verifica o número de série do dispositivo (`dev_eui`), que é extraído e processado para determinar um índice.
 
- // 3. **Configuração do MQTT**:
- //    - A função cria um cliente MQTT utilizando o URL do broker configurado (`mqtt://34.67.184.199:1883`) e um `clientId` específico.
- //    - O cliente se conecta ao broker e, ao ser conectado, prepara uma mensagem no formato JSON, contendo o número de série do dispositivo (`SN`) e os dados que representam o comando a ser enviado. A mensagem inclui várias configurações relacionadas ao dispositivo, como permissões, limites e horários.
+// 2. **Validação e processamento dos dados**:
+//    - A função valida o número de série (`serial_id`) e o índice extraído da string do número de série para garantir que ele seja válido.
+//    - Os valores para as variáveis de comando, como permissões, limites, e horários, são convertidos para números ou padrões apropriados caso não sejam encontrados.
 
- // 4. **Publicação da mensagem MQTT**:
- //    - A mensagem preparada é publicada no tópico "downlink" usando o método `publish` do cliente MQTT. Caso a publicação seja bem-sucedida, a conexão MQTT é encerrada. Caso contrário, um erro de publicação é registrado no console.
+// 3. **Configuração do MQTT**:
+//    - A função cria um cliente MQTT utilizando o URL do broker configurado (`mqtt://34.67.184.199:1883`) e um `clientId` específico.
+//    - O cliente se conecta ao broker e, ao ser conectado, prepara uma mensagem no formato JSON, contendo o número de série do dispositivo (`SN`) e os dados que representam o comando a ser enviado. A mensagem inclui várias configurações relacionadas ao dispositivo, como permissões, limites e horários.
 
- // 5. **Tratamento de erros**:
- //    - Caso ocorra algum erro de conexão MQTT, a função registra o erro no console para permitir a depuração.
+// 4. **Publicação da mensagem MQTT**:
+//    - A mensagem preparada é publicada no tópico "downlink" usando o método `publish` do cliente MQTT. Caso a publicação seja bem-sucedida, a conexão MQTT é encerrada. Caso contrário, um erro de publicação é registrado no console.
+
+// 5. **Tratamento de erros**:
+//    - Caso ocorra algum erro de conexão MQTT, a função registra o erro no console para permitir a depuração.
 
 import { Analysis, Resources } from "@tago-io/sdk";
 import { Data, TagoContext } from "@tago-io/sdk/lib/types";
@@ -34,7 +34,7 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
     const resources = new Resources({ token: token })
     const device_info = await resources.devices.info(device);
     const serial_id = device_info.tags.find((x) => x.key === "dev_eui")?.value;
-    const splitted = serial_id?.split("_"); 
+    const splitted = serial_id?.split("_");
     if (!splitted) {
         throw new Error("Serial Number not found!");
     }
@@ -42,7 +42,7 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
     if (isNaN(index)) {
         throw new Error("Invalid number in serial number!");
     }
-    const command_has_permision = scope.find((x) => x.variable === "command_has_permision")?.value || 1;
+    const command_has_permision = scope.find((x) => x.variable === "command_has_permision")?.value;
     const lim = scope.find((x) => x.variable === "lim")?.value || 0;
     const obj = scope.find((x) => x.variable === "obj")?.value || 0;
 
@@ -52,6 +52,14 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
     const imimi = scope.find((x) => x.variable === "imimi")?.value;
     const IMiHh = String(imimi).split(":")[0];
     const IMiMi = String(imimi).split(":")[1];
+    const wtini = scope.find((x) => x.variable === "wtini")?.value;
+    const WTinih = String(wtini).split(":")[0];
+    const WTinim = String(wtini).split(":")[1];
+    const wtend = scope.find((x) => x.variable === "wtend")?.value;
+    const WTendh = String(wtend).split(":")[0];
+    const WTendm = String(wtend).split(":")[1];
+    const ltemp = scope.find((x) => x.variable === "ltemp")?.value;
+    const lhum = scope.find((x) => x.variable === "lhum")?.value;
 
 
     // Cria o cliente MQTT
@@ -72,6 +80,12 @@ async function sendCommand(context: TagoContext, scope: Data[]) {
                         "DMaMi": Number(DMaMi) || 0,
                         "IMiHh": Number(IMiHh) || 0,
                         "IMiMi": Number(IMiMi) || 0,
+                        "WTinih": Number(WTinih) || 0,
+                        "WTinim": Number(WTinim) || 0,
+                        "WTendh": Number(WTendh) || 0,
+                        "WTendm": Number(WTendm) || 0,
+                        "LTemp": Number(ltemp),
+                        "LHum": Number(lhum)
                     },
                 },
             }
