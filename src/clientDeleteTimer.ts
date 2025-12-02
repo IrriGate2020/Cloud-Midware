@@ -6,8 +6,7 @@
 // O evento 'error' trata qualquer erro de conexão, mostrando uma mensagem de erro no console.
 
 import mqtt from 'mqtt';
-import { Device, Resources, Utils } from '@tago-io/sdk';
-import Account from '@tago-io/sdk/lib/modules/Resources/Account';
+import { Device } from '@tago-io/sdk';
 
 const tago_server_udp = require('./middleware/tago_udp_access');
 
@@ -66,7 +65,6 @@ client.on('message', async (topic, message) => {
         }
 
         const mainDevice = new Device({ token: mainDeviceToken });
-        const resources = new Resources({ token: mainDeviceToken });
 
         // Pega as infos do device principal para descobrir o device que guarda o timer
         const mainInfo = await mainDevice.info().catch(() => undefined);
