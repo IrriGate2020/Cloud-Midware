@@ -9,7 +9,7 @@
 // 5. Para cada sensor em data.sens, cria um dispositivo na TagoIO
 // 6. O serial number de cada sensor segue o padrão: {SN_central}_{numero_sensor}
 
-import { Account, Resources } from "@tago-io/sdk";
+import { Account } from "@tago-io/sdk";
 import axios from "axios";
 
 // Token da conta TagoIO com permissões para criar dispositivos
@@ -88,7 +88,6 @@ export async function autoRegisterSensors(
 
         // Inicializa a conta TagoIO
         const account = new Account({ token: ACCOUNT_TOKEN });
-        const resources = new Resources({ token: ACCOUNT_TOKEN });
 
         // Busca a central existente pelo serial number
         console.log(`🔍 Buscando central ${data.SN}...`);
@@ -178,10 +177,16 @@ async function registerSensorDevice(
     networkId?: string
 ): Promise<void> {
     try {
-        // Verifica se o sensor já existe usando API REST
+        // Verifica se o sensor já existe
         console.log(`🔍 Verificando se sensor ${serialNumber} já existe...`);
         try {
-            const listResponse = await account.devices.list({ serial: serialNumber, amount: 1 });
+            const listResponse = await account.devices.list({ 
+                page: 1, 
+                amount: 1,
+                filter: {
+                    tags: [{ key: "serial_number", value: serialNumber }]
+                }
+            });
             console.log(`Resposta da verificação de existência do sensor ${serialNumber}:`, listResponse);
             if (listResponse && listResponse.length > 0) {
                 console.log(`📡 Sensor ${serialNumber} já cadastrado`);
