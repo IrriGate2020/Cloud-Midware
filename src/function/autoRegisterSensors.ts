@@ -184,7 +184,7 @@ async function registerSensorDevice(
                 page: 1, 
                 amount: 1,
                 filter: {
-                    tags: [{ key: "serial_number", value: serialNumber }]
+                    tags: [{ key: "dev_eui", value: serialNumber }]
                 }
             });
             console.log(`Resposta da verificação de existência do sensor ${serialNumber}:`, listResponse);
@@ -203,9 +203,9 @@ async function registerSensorDevice(
             connector: "669188217d61980008c18be1",
             network: "6686e259ffa21c0008faa296",
             chunk_period: "day",
-            chunk_retention: 7,
+            chunk_retention: 31,
             tags: [
-                { key: "serial_number", value: serialNumber },
+                { key: "dev_eui", value: serialNumber },
                 { key: "central_sn", value: centralSN },
                 { key: "sensor_number", value: sensorNumber },
                 ...(groupId ? [{ key: "group_id", value: groupId }] : []),
