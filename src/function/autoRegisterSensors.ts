@@ -196,10 +196,31 @@ async function registerSensorDevice(
             console.log(`⚠️ Erro ao verificar existência do sensor, continuando com criação...`);
         }
 
+        // Define o tipo de sensor baseado no MOD
+        let sensorType = "irrigation"; // padrão
+        switch (sensorConfig.MOD) {
+            case 0:
+                sensorType = "irrigation";
+                break;
+            case 1:
+                sensorType = "nutrition";
+                break;
+            case 2:
+                sensorType = "nutrition_2";
+                break;
+            case 4:
+                sensorType = "illumination";
+                break;
+            case 5:
+                sensorType = "climate";
+                break;
+        }
+
         // Cria o dispositivo do sensor
         const deviceConfig: any = {
             name: `Sensor ${sensorNumber} - Central ${centralSN}`,
             type: "immutable",
+            serie_number: serialNumber,
             connector: "669188217d61980008c18be1",
             network: "6686e259ffa21c0008faa296",
             chunk_period: "day",
@@ -210,7 +231,7 @@ async function registerSensorDevice(
                 { key: "sensor_number", value: sensorNumber },
                 ...(groupId ? [{ key: "group_id", value: groupId }] : []),
                 ...(organizationId ? [{ key: "organization_id", value: organizationId }] : []),
-                { key: "sensor", value: "irrigation" },
+                { key: "sensor", value: sensorType },
                 { key: "device_type", value: "device" },
                 { key: "dev_mode", value: "automation" },
             ],
@@ -222,6 +243,67 @@ async function registerSensorDevice(
             const createResponse = await account.devices.create(deviceConfig);
             const deviceId = createResponse.device_id;
             console.log(`✅ Sensor ${serialNumber} cadastrado com ID: ${deviceId}`);
+
+            // Cria token de autorização para o sensor
+            try {
+                const deviceAuthToken = await account.ServiceAuthorization.tokenCreate({
+                    name: `${serialNumber}_token`,
+                    permission: "full"
+                });
+
+                console.log(`🔑 Token de autorização criado para sensor ${serialNumber}`);
+            } catch (tokenError) {
+                console.warn(`⚠️ Erro ao criar token de autorização:`, tokenError);
+            }
+
+            // Configura parâmetros adicionais do device
+            try {
+                await account.devices.paramSet(deviceId, { key: "dev_eui", value: serialNumber, sent: false });
+                await account.devices.paramSet(deviceId, { key: "dev_lastcheckin", value: "-", sent: false });
+                await account.devices.paramSet(deviceId, { key: "dev_battery", value: "-", sent: false });
+            } catch (paramError) {
+                console.warn(`⚠️ Erro ao configurar parâmetros adicionais:`, paramError);
+            }
+
+            // Configura o dashboard_url baseado no tipo de sensor
+            try {
+                const dashboardMap: { [key: string]: string } = {
+                    'irrigation': 'irrigation',
+                    'nutrition': 'nutrition',
+                    'nutrition_2': 'nutrition_2',
+                    'illumination': 'illumination',
+                    'climate': 'climate'
+                };
+
+                const connectorType = dashboardMap[sensorType];
+                if (connectorType) {
+                    // Busca dashboard pelo connector_id (tipo de sensor)
+                    const [dash] = await account.dashboards.list({
+                        amount: 1,
+                        fields: ["id", "tags"],
+                        filter: {
+                            tags: [{ key: "connector_id", value: connectorType }]
+                        }
+                    });
+
+                    if (dash) {
+                        const dashboardUrl = `https://admin.tago.io/dashboards/info/${dash.id}?org_dev=${organizationId}&group_dev=${groupId}&sensor=${deviceId}`;
+                        
+                        await account.devices.paramSet(deviceId, {
+                            key: "dashboard_url",
+                            value: dashboardUrl,
+                            sent: false
+                        });
+                        
+                        console.log(`📊 Dashboard URL configurado para sensor ${serialNumber}`);
+                    } else {
+                        console.warn(`⚠️ Dashboard não encontrado para tipo ${sensorType}`);
+                    }
+                }
+            } catch (dashError) {
+                console.warn(`⚠️ Erro ao configurar dashboard_url:`, dashError);
+            }
+
         } catch (createError) {
             console.error(`❌ Erro ao criar sensor ${serialNumber}:`, createError);
             throw createError;
