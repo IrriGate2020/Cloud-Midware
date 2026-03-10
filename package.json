@@ -5,18 +5,24 @@
   "main": "build/index.js",
   "scripts": {
     "build": "tsc",
+    "build:analysis": "analysis-builder src/analysis/createAlert.ts ./build/createAlert.tago.js && analysis-builder src/analysis/alertAnalysis.ts ./build/alertAnalysis.tago.js && analysis-builder src/analysis/timerDuration.ts ./build/timerDuration.tago.js && analysis-builder src/analysis/deleteCommandTimer.ts ./build/deleteCommandTimer.tago.js && analysis-builder src/analysis/sendCommandTimer.ts ./build/sendCommandTimer.tago.js && analysis-builder src/analysis/sendCommandNow.ts ./build/sendCommandNow.tago.js && analysis-builder src/analysis/sendCommandNowNew.ts ./build/sendCommandNowNew.tago.js && analysis-builder src/analysis/sendCommandSens.ts ./build/sendCommandSens.tago.js && analysis-builder src/analysis/sendCommandFertIrrigation.ts ./build/sendCommandFertIrrigation.tago.js",
+    "build:widget": "cd timer-widget && npm run build",
+    "build:all": "npm run build:analysis && npm run build:widget",
     "start": "ts-node src/clientUplink.ts",
     "startClientDelete": "ts-node src/clientDeleteTimer.ts",
+    "test:timer": "ts-node src/test/testTimerDuration.ts",
     "test": "echo \"No test specified\" && exit 0"
   },
   "author": "IrriGate2020",
   "license": "MIT",
   "dependencies": {
-    "@tago-io/sdk": "10.10.0",
+    "@tago-io/sdk": "12.2.2",
     "axios": "^1.6.0",
+    "dotenv": "^17.3.1",
     "mqtt": "^5.14.0"
   },
   "devDependencies": {
+    "@tago-io/builder": "3.0.3",
     "typescript": "^5.0.0"
   }
 }

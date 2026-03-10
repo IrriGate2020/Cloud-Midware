@@ -1,0 +1,25 @@
+{
+  "name": "tagoio-timer-widget",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack serve --mode development --open",
+    "start": "webpack serve --mode development --open"
+  },
+  "dependencies": {
+    "@tago-io/custom-widget": "^1.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.0.0",
+    "ts-loader": "^9.5.0",
+    "webpack": "^5.0.0",
+    "webpack-cli": "^5.0.0",
+    "webpack-dev-server": "^4.0.0",
+    "html-webpack-plugin": "^5.0.0"
+  }
+}
