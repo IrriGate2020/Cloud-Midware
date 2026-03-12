@@ -61,7 +61,7 @@ client.on('message', async (topic, message) => {
     }
     
     // Envia os dados para TagoIO (sempre, após autocadastro se necessário)
-    //await sendDataToTago(messageStr);
+    await sendDataToTago(messageStr);
 });
 
 // Evento de erro

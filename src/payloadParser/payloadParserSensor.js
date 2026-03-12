@@ -46,13 +46,26 @@ function toTagoFormat(value) {
     "SOL",
     "EPS",
     "POT",
+    "ERRO",
+    "PH",
+    "OUTST",
+    "ONDUR",
+    "ONSTR"
   ];
+
 
   fields.forEach((field) => {
     if (jsonObj.hasOwnProperty(field)) {
       // DMaMi e IMiMi devem estar no formato string "hh:mm"
       if (["DMaMi", "IMiMi"].includes(field)) {
         data[0].metadata[field] = convertToTimeFormat(jsonObj[field]);
+      } else if (["ONSTR", "ONDUR"].includes(field)) {
+        // ONSTR e ONDUR devem permanecer como string (horários)
+        // Mas só se tiver valor válido (não null/undefined/vazio)
+        const value = jsonObj[field];
+        if (value !== null && value !== undefined && value !== "") {
+          data[0].metadata[field] = String(value);
+        }
       } else {
         data[0].metadata[field] = Number(jsonObj[field]);
       }

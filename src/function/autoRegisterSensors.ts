@@ -244,6 +244,19 @@ async function registerSensorDevice(
             const deviceId = createResponse.device_id;
             console.log(`✅ Sensor ${serialNumber} cadastrado com ID: ${deviceId}`);
 
+            // Adiciona tag device_id ao sensor recém-criado
+            try {
+                await account.devices.edit(deviceId, {
+                    tags: [
+                        ...deviceConfig.tags,
+                        { key: "device_id", value: deviceId }
+                    ]
+                });
+                console.log(`🏷️ Tag device_id adicionada ao sensor ${serialNumber}`);
+            } catch (tagError) {
+                console.warn(`⚠️ Erro ao adicionar tag device_id:`, tagError);
+            }
+
             // Cria token de autorização para o sensor
             try {
                 const deviceAuthToken = await account.ServiceAuthorization.tokenCreate({

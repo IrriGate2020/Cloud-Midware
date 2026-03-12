@@ -22,24 +22,13 @@ const VARIABLE_NAME = "data";
 
 interface TimerState {
   isActive: boolean;
-  activeSince: string | null;
-  lastEN: number | null;
-  lastRecordedTime?: number; // Último tempo registrado quando desativou (em ms)
+  timerStart: string | null; // ONSTR - horário de início
+  timerDuration: string | null; // ONDUR - tempo que ficou ligado
   deviceId?: string; // ID do device para validação
 }
 
 function getStorageKey(deviceId?: string): string {
   return `timer-widget-state-${VARIABLE_NAME}-${deviceId || 'unknown'}`;
-}
-
-function formatDuration(ms: number) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
 // Funções para persistência no localStorage
@@ -77,13 +66,11 @@ interface TimerWidgetProps {
 
 export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initialData }) => {
   const [isActive, setIsActive] = useState(false);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const [lastRecordedTime, setLastRecordedTime] = useState<number>(0);
+  const [timerStart, setTimerStart] = useState<string | null>(null); // ONSTR
+  const [timerDuration, setTimerDuration] = useState<string | null>(null); // ONDUR
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [widgetDeviceId, setWidgetDeviceId] = useState<string | null>(initialDeviceId || null); // Device configurado no widget
-  const activeSinceRef = useRef<Date | null>(null);
-  const lastENRef = useRef<number | null>(null);
-  const lastDataRef = useRef<DataPoint | null>(null);
+  const lastOUTSTRef = useRef<number | null>(null);
   
   // BUSCAR DEVICE ID DO WIDGET (contexto do dashboard)
   useEffect(() => {
@@ -143,7 +130,7 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
       return;
     }
 
-    // Processar dados iniciais (mesmo handler que usávamos com getData)
+    // Processar dados iniciais
     const dataPoints: DataPoint[] = [];
     const timerStartPoints: DataPoint[] = [];
     const timerDurationPoints: DataPoint[] = [];
@@ -166,34 +153,11 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
           return tb - ta;
         })[0];
 
-        const timestamp = latest.metadata?.timestamp || latest.value;
-        const deviceId = getDeviceIdFromPoint(latest);
-        
-        if (timestamp && deviceId) {
-          const startDate = new Date(Number(timestamp));
-          console.log("[TimerWidget] Último timer_start:", startDate.toLocaleString('pt-BR'));
-          
-          // Verificar se tem timer_duration correspondente (mesma sessão)
-          const hasDuration = timerDurationPoints.some(d => {
-            // Timer foi finalizado se tem duration DEPOIS do start
-            const durationTime = new Date(d.time || d.created_at || "").getTime();
-            const startTime = new Date(latest.time || latest.created_at || "").getTime();
-            return durationTime > startTime;
-          });
-          
-          if (!hasDuration) {
-            // Não tem duration = timer ainda ativo
-            activeSinceRef.current = startDate;
-            lastENRef.current = 1;
-            setIsActive(true);
-            // Ao voltar para a tela, usar o tempo decorrido desde o timer_start
-            const diff = Date.now() - startDate.getTime();
-            setElapsedMs(diff > 0 ? diff : 0);
-            setCurrentDeviceId(deviceId);
-            console.log("[TimerWidget] Timer ativo desde carregamento inicial, tempo já decorrido:", formatDuration(diff));
-          } else {
-            console.log("[TimerWidget] Timer já foi finalizado");
-          }
+        const onstr = latest.value || latest.metadata?.ONSTR;
+        if (onstr) {
+          console.log("[TimerWidget] ONSTR recebido:", onstr);
+          setTimerStart(String(onstr));
+          setCurrentDeviceId(getDeviceIdFromPoint(latest) || currentDeviceId);
         }
       }
 
@@ -205,15 +169,14 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
           return tb - ta;
         })[0];
 
-        const durationSeconds = latest.metadata?.duration_seconds;
-        if (durationSeconds) {
-          const durationMs = durationSeconds * 1000;
-          setLastRecordedTime(durationMs);
-          console.log("[TimerWidget] Último timer_duration:", formatDuration(durationMs));
+        const ondur = latest.value || latest.metadata?.ONDUR;
+        if (ondur) {
+          console.log("[TimerWidget] ONDUR recebido:", ondur);
+          setTimerDuration(String(ondur));
         }
       }
 
-      // Processar dados normais para pegar device ID e estado atual do EN
+      // Processar dados normais para pegar device ID e estado atual do OUTST
       if (dataPoints.length > 0) {
         const latest = dataPoints.sort((a, b) => {
           const ta = new Date(a.time || a.created_at || "").getTime();
@@ -228,30 +191,15 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
           setCurrentDeviceId(latestDeviceId);
         }
         
-        // Verificar estado atual do EN
-        if (latest.metadata && latest.metadata.EN !== undefined) {
-          const enRaw = latest.metadata.EN;
-          const enNumber = typeof enRaw === "string" ? Number(enRaw) : (enRaw as number | boolean | undefined);
-          const currentEN = enNumber === 1 || enRaw === true || enRaw === "1" || enRaw === "true" ? 1 : 0;
+        // Verificar estado atual do OUTST
+        if (latest.metadata && latest.metadata.OUTST !== undefined) {
+          const outstRaw = latest.metadata.OUTST;
+          const outstNumber = typeof outstRaw === "string" ? Number(outstRaw) : (outstRaw as number | boolean | undefined);
+          const currentOUTST = outstNumber === 1 || outstRaw === true || outstRaw === "1" || outstRaw === "true" ? 1 : 0;
           
-          console.log("[TimerWidget] Estado atual do EN:", currentEN, "(valor bruto:", enRaw, ")");
-          lastENRef.current = currentEN;
-          
-          if (currentEN === 0) {
-            // EN = 0: garantir que o timer não está ativo
-            setIsActive(false);
-            activeSinceRef.current = null;
-            setElapsedMs(0);
-          } else if (currentEN === 1 && !activeSinceRef.current) {
-            // EN = 1 e não temos activeSince definido (por ex.: não encontramos timer_start histórico)
-            // Neste caso, considerar o timer ativo desde o último "data" recebido.
-            const startTime = new Date(latest.time || latest.created_at || Date.now());
-            activeSinceRef.current = startTime;
-            setIsActive(true);
-            const diff = Date.now() - startTime.getTime();
-            setElapsedMs(diff > 0 ? diff : 0);
-            console.log("[TimerWidget] EN=1 sem timer_start histórico; iniciando timer a partir do último dado:", startTime.toLocaleString('pt-BR'));
-          }
+          console.log("[TimerWidget] Estado atual do OUTST:", currentOUTST, "(valor bruto:", outstRaw, ")");
+          lastOUTSTRef.current = currentOUTST;
+          setIsActive(currentOUTST === 1);
         }
       }
 
@@ -259,8 +207,9 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
   
   // Usa apenas os dados em tempo real do TagoIO (onRealtime)
   // Lógica:
-  // - Último EN recebido (1 ou 0) define se está ativo ou inativo
-  // - Quando EN==1, o tempo de referência é o tempo do último dado recebido (independente de ter EN)
+  // - Último OUTST recebido (1 ou 0) define se está ativado ou desativado
+  // - ONSTR vem com a ativação
+  // - ONDUR vem com a desativação
   useEffect(() => {
     if (typeof window === "undefined" || !window.TagoIO) {
       console.warn("[TimerWidget] TagoIO SDK nao encontrado; sem dados em tempo real");
@@ -297,43 +246,37 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
 
       console.log(`[TimerWidget] Realtime recebeu ${dataPoints.length} data, ${timerStartPoints.length} timer_start, ${timerDurationPoints.length} timer_duration (device: ${targetDeviceId})`);
 
-      // PROCESSAR timer_start se chegou (tem prioridade!)
+      // PROCESSAR timer_start se chegou (ONSTR - início da ativação)
       if (timerStartPoints.length > 0) {
         const latestTimerStart = timerStartPoints[0];
         const deviceId = getDeviceIdFromPoint(latestTimerStart);
+        const onstr = latestTimerStart.value || latestTimerStart.metadata?.ONSTR;
 
-        if (deviceId) {
-          console.log("[TimerWidget] ✅ timer_start recebido via realtime para device:", deviceId);
+        if (deviceId && onstr) {
+          console.log("[TimerWidget] ✅ ONSTR recebido via realtime:", onstr);
 
           if (!currentDeviceId) {
             setCurrentDeviceId(deviceId);
           }
 
-          // IMPORTANTE: para o cronômetro visual, sempre começamos AGORA,
-          // independente do timestamp que veio no dado (evita acumular tempo antigo).
-          const startDate = new Date();
-          activeSinceRef.current = startDate;
-          lastENRef.current = 1;
+          setTimerStart(String(onstr));
+          lastOUTSTRef.current = 1;
           setIsActive(true);
-          setElapsedMs(0); // Novo ciclo: começa de 0
-
-          console.log(`[TimerWidget] Timer INICIADO AGORA (realtime): ${startDate.toLocaleString('pt-BR')}`);
         }
       }
       
-      // PROCESSAR timer_duration se chegou (significa que desativou)
+      // PROCESSAR timer_duration se chegou (ONDUR - tempo que ficou ligado)
       if (timerDurationPoints.length > 0) {
         const latestDuration = timerDurationPoints[0];
-        const durationSeconds = latestDuration.metadata?.duration_seconds;
+        const ondur = latestDuration.value || latestDuration.metadata?.ONDUR;
         
-        if (durationSeconds) {
-          const durationMs = durationSeconds * 1000;
-          console.log("[TimerWidget] ✅ timer_duration recebido:", formatDuration(durationMs));
-          setLastRecordedTime(durationMs);
+        if (ondur) {
+          console.log("[TimerWidget] ✅ ONDUR recebido:", ondur);
+          setTimerDuration(String(ondur));
         }
       }
       
-      // PROCESSAR dados normais (variável "data")
+      // PROCESSAR dados normais (variável "data") para OUTST
       if (!dataPoints.length) return;
 
       // Ordena os novos pontos por tempo (mais recente primeiro)
@@ -354,88 +297,56 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
         setCurrentDeviceId(incomingDeviceId);
       }
 
-      // Atualiza o último dado global se este for mais recente
-      const currentLast = lastDataRef.current;
-      const newestTime = new Date(newestData.time || newestData.created_at || "").getTime();
-      const currentLastTime = currentLast
-        ? new Date(currentLast.time || currentLast.created_at || "").getTime()
-        : 0;
+      // Procura o último ponto deste lote que tenha OUTST
+      const lastWithOUTST = sorted.find((p) => p.metadata && p.metadata.OUTST !== undefined);
 
-      if (!currentLast || newestTime >= currentLastTime) {
-        lastDataRef.current = newestData;
-      }
-
-      // Procura o último ponto deste lote que tenha EN
-      const lastWithEN = sorted.find((p) => p.metadata && p.metadata.EN !== undefined);
-
-      if (!lastWithEN) {
-        console.log("[TimerWidget] Nenhum EN neste lote, mantendo estado atual. EN anterior:", lastENRef.current);
+      if (!lastWithOUTST) {
+        console.log("[TimerWidget] Nenhum OUTST neste lote, mantendo estado atual. OUTST anterior:", lastOUTSTRef.current);
         return;
       }
 
-      const enRaw = lastWithEN.metadata!.EN;
-      const enNumber = typeof enRaw === "string" ? Number(enRaw) : (enRaw as number | boolean | undefined);
-      const nowActive = enNumber === 1 || enRaw === true || enRaw === "1" || enRaw === "true";
+      const outstRaw = lastWithOUTST.metadata!.OUTST;
+      const outstNumber = typeof outstRaw === "string" ? Number(outstRaw) : (outstRaw as number | boolean | undefined);
+      const outstActive = outstNumber === 1 || outstRaw === true || outstRaw === "1" || outstRaw === "true";
 
       console.log("[TimerWidget] Ultimo dado (lote):", newestData);
-      console.log("[TimerWidget] Ultimo EN (lote):", lastWithEN);
-      console.log("[TimerWidget] EN bruto:", enRaw, "| ativo:", nowActive);
+      console.log("[TimerWidget] Ultimo OUTST (lote):", lastWithOUTST);
+      console.log("[TimerWidget] OUTST bruto:", outstRaw, "| ativo:", outstActive);
 
-      if (!nowActive) {
-        // EN = 0: apenas desativar visualmente
-        // A análise vai calcular e enviar timer_start + timer_duration
-        console.log("[TimerWidget] EN = 0, desativando timer (aguardando timer_duration da análise)");
+      if (!outstActive) {
+        // OUTST = 0: desativado
+        console.log("[TimerWidget] OUTST = 0, saída desativada");
         
-        lastENRef.current = 0;
+        lastOUTSTRef.current = 0;
         setIsActive(false);
-        activeSinceRef.current = null;
-        setElapsedMs(0);
         
-        // Salvar estado sem calcular tempo (a análise faz isso)
+        // Salvar estado
         saveTimerState({ 
           isActive: false, 
-          activeSince: null, 
-          lastEN: 0,
+          timerStart: timerStart || null,
+          timerDuration: timerDuration || null,
           deviceId: currentDeviceId || undefined
         }, currentDeviceId || undefined);
         
         return;
       }
 
-      // EN = 1: marcar como ativo, mas NÃO definir tempo de início aqui
-      // O tempo correto virá do timer_start enviado pela análise
-      console.log(`[TimerWidget] EN = 1 recebido`);
+      // OUTST = 1: ativo
+      console.log(`[TimerWidget] OUTST = 1, saída ativada`);
+      lastOUTSTRef.current = 1;
+      setIsActive(true);
 
-      // Se ainda não tem timer ativo (sem activeSince), apenas marcar que deveria estar ativo
-      // O timer_start vai definir o tempo correto
-      if (!activeSinceRef.current) {
-        console.log(`[TimerWidget] Aguardando timer_start para definir tempo de início...`);
-        // Não fazer nada, esperar timer_start chegar
-      } else {
-        // Já tem um timer rodando, mantém
-        console.log(`[TimerWidget] Timer já está ativo desde: ${activeSinceRef.current?.toLocaleString('pt-BR')}`);
-      }
-
-      lastENRef.current = 1;
+      // Salvar estado
+      saveTimerState({ 
+        isActive: true, 
+        timerStart: timerStart || null,
+        timerDuration: timerDuration || null,
+        deviceId: currentDeviceId || undefined
+      }, currentDeviceId || undefined);
     };
 
     window.TagoIO.onRealtime(handleRealtime);
-  }, [currentDeviceId, widgetDeviceId]); // Reagir quando device mudar
-
-  // Atualiza o cronômetro a cada segundo quando está ativo
-  useEffect(() => {
-    if (!isActive || !activeSinceRef.current) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const diff = now.getTime() - activeSinceRef.current!.getTime();
-      setElapsedMs(diff);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isActive]);
-
-  // (Tudo vem de onRealtime, sem chamada direta à API)
+  }, [currentDeviceId, widgetDeviceId, timerStart, timerDuration]); // Reagir quando device mudar
 
   return (
     <div
@@ -450,66 +361,81 @@ export const TimerWidget: React.FC<TimerWidgetProps> = ({ initialDeviceId, initi
         justifyContent: "center",
         fontFamily: "sans-serif",
         position: "relative",
+        padding: "16px",
+        boxSizing: "border-box",
+        overflow: "hidden",
       }}
     >
-      {(widgetDeviceId || currentDeviceId) && (
-        <div style={{ 
-          position: 'absolute', 
-          top: 8, 
-          right: 8, 
-          fontSize: 10, 
-          opacity: 0.5,
-          background: 'rgba(255,255,255,0.1)',
-          padding: '2px 8px',
-          borderRadius: 4
-        }}>
-          Device: {(widgetDeviceId || currentDeviceId)?.substring(0, 8)}...
-        </div>
-      )}
-      
-      <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>
-        Tempo ativo de: {VARIABLE_NAME}
+      <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 16 }}>
+        Status da Saída
       </div>
 
       <div
         style={{
-          fontSize: 32,
-          fontWeight: "bold",
-          letterSpacing: 2,
-          marginBottom: 8,
-        }}
-      >
-        {formatDuration(elapsedMs)}
-      </div>
-
-      <div
-        style={{
-          padding: "4px 10px",
+          padding: "8px 16px",
           borderRadius: 999,
           background: isActive ? "#2ecc71" : "#e74c3c",
-          fontSize: 12,
+          fontSize: 14,
           textTransform: "uppercase",
+          fontWeight: "bold",
+          marginBottom: 24,
         }}
       >
-        {isActive ? "Ativo" : "Inativo"}
+        {isActive ? "Ativada" : "Desativada"}
       </div>
 
-      {lastRecordedTime > 0 && (
+      {timerStart && isActive && (
         <div
           style={{
-            marginTop: 20,
+            marginBottom: 16,
             padding: "12px 16px",
-            background: "rgba(255, 255, 255, 0.1)",
+            background: "rgba(52, 152, 219, 0.2)",
             borderRadius: 8,
             borderLeft: "3px solid #3498db",
+            width: "100%",
+            textAlign: "center",
           }}
         >
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
-            Último tempo registrado:
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+            Horário de Início (ONSTR):
           </div>
-          <div style={{ fontSize: 20, fontWeight: "bold", color: "#3498db" }}>
-            {formatDuration(lastRecordedTime)}
+          <div style={{ fontSize: 16, fontWeight: "bold", color: "#3498db" }}>
+            {timerStart}
           </div>
+        </div>
+      )}
+
+      {timerDuration && !isActive && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: "12px 16px",
+            background: "rgba(46, 204, 113, 0.2)",
+            borderRadius: 8,
+            borderLeft: "3px solid #2ecc71",
+            width: "100%",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+            Tempo Ligado (ONDUR):
+          </div>
+          <div style={{ fontSize: 16, fontWeight: "bold", color: "#2ecc71" }}>
+            {timerDuration}
+          </div>
+        </div>
+      )}
+
+      {!timerStart && !timerDuration && (
+        <div
+          style={{
+            fontSize: 12,
+            opacity: 0.5,
+            textAlign: "center",
+            marginTop: 20,
+          }}
+        >
+          Aguardando dados do sensor...
         </div>
       )}
     </div>
