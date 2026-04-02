@@ -299,17 +299,29 @@ async function sendDataToTago(data: any) {
     const arrayOutput: any = out?.ArrOutp;
     //const duration: any = out?.outTime[1];
 
-    let tagoData: any = [];
+    // Buscar todos os outputs de uma vez (1 GET apenas)
+    const outputVariables = arrayOutput.map((_: any, i: number) => `output${i + 1}`);
+    const allOldOutputs = await device.getData({
+      variables: outputVariables,
+      groups: serialNumber,
+      qty: 9999
+    });
+
+    // Criar um mapa para acesso rápido
+    const oldOutputsMap = new Map();
+    allOldOutputs.forEach((data: any) => {
+      oldOutputsMap.set(data.variable, data);
+    });
+
+    // Processar cada output
     for (let i = 0; i < arrayOutput.length; i++) {
-      tagoData.push({ variable: `output${i + 1}`, value: arrayOutput[i], group: serialNumber });
-      const oldDataOut = await device.getData({
-        variables: `output${i + 1}`,
-        groups: serialNumber,
-      });
-      if (oldDataOut.length === 0) {
-        await device.sendData({ variable: `output${i + 1}`, value: arrayOutput[i], group: serialNumber }).then(console.log).catch(console.error);
+      const variableName = `output${i + 1}`;
+      const oldDataOut = oldOutputsMap.get(variableName);
+
+      if (!oldDataOut) {
+        await device.sendData({ variable: variableName, value: arrayOutput[i], group: serialNumber }).then(console.log).catch(console.error);
       } else {
-        await device.editData({ id: oldDataOut[0].id, value: arrayOutput[i] })
+        await device.editData({ id: oldDataOut.id, value: arrayOutput[i] })
       }
     }
   }

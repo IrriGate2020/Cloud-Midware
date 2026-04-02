@@ -9,6 +9,7 @@ interface AlertMetadata {
     email_enabled: boolean;
     created_at: string;
     description?: string;
+    lock?: boolean;  // Sistema de lock para evitar alertas repetitivos
 }
 
 async function alertAnalysis(context: any, scope: any[]) {
@@ -141,42 +142,95 @@ async function alertAnalysis(context: any, scope: any[]) {
 
             // Disparar notificação se necessário
             if (should_trigger) {
-                context.log(`Alert triggered for ${alert_variable}!`);
+                context.log(`Alert condition met for ${alert_variable}!`);
 
-                // Sempre enviar notificação push se houver usuário
-                if (alert_metadata.send_to) {
-                    try {
-                        await resources.run.notificationCreate(alert_metadata.send_to, {
-                            title: `Alerta: ${alert_variable}`,
-                            message: `A condição do alerta foi atingida: ${alert_variable} ${condition} ${threshold_value}. Valor atual: ${current_value}`
-                        });
-                        context.log(`Push notification sent to user ${alert_metadata.send_to}`);
-                    } catch (error) {
-                        context.log(`Error sending notification: ${error}`);
-                    }
+                // Verificar o estado do lock
+                const is_locked = alert_metadata.lock === true;
 
-                    // TODO: Se email_enabled for true, enviar email também
-                    // if (alert_metadata.email_enabled) {
-                    //     await resources.run.emailSend(...);
-                    // }
+                if (is_locked) {
+                    context.log(`Alert is locked - skipping notification to avoid spam`);
                 } else {
-                    context.log(`No user (send_to) configured for this alert`);
-                }
+                    context.log(`Alert triggered for ${alert_variable}! Sending notifications...`);
 
-                // Opcional: Registrar o disparo do alerta no dispositivo do grupo
-                await resources.devices.sendDeviceData(group_device_id, {
-                    variable: "alert_triggered",
-                    value: alert_variable,
-                    metadata: {
-                        alert_group: alert_data.group,
-                        alert_variable: alert_variable,
-                        device_id: device_id,
-                        condition: condition,
-                        threshold: threshold_value,
-                        current_value: current_value,
-                        timestamp: new Date().toISOString()
+                    // Sempre enviar notificação push se houver usuário
+                    if (alert_metadata.send_to) {
+                        try {
+                            // Buscar nome do dispositivo
+                            const device_name = device_info.name || device_id;
+                            
+                            await resources.run.notificationCreate(alert_metadata.send_to, {
+                                title: `Alerta: ${alert_variable}`,
+                                message: `A condição do alerta foi atingida para o(a) ${device_name}: ${alert_variable} ${condition} ${threshold_value}. Valor atual: ${current_value}`
+                            });
+                            context.log(`Push notification sent to user ${alert_metadata.send_to}`);
+                        } catch (error) {
+                            context.log(`Error sending notification: ${error}`);
+                        }
+
+                        // TODO: Se email_enabled for true, enviar email também
+                        // if (alert_metadata.email_enabled) {
+                        //     await resources.run.emailSend(...);
+                        // }
+                    } else {
+                        context.log(`No user (send_to) configured for this alert`);
                     }
-                });
+
+                    // Registrar o disparo do alerta no dispositivo do grupo
+                    await resources.devices.sendDeviceData(group_device_id, {
+                        variable: "alert_triggered",
+                        value: alert_variable,
+                        metadata: {
+                            alert_group: alert_data.group,
+                            alert_variable: alert_variable,
+                            device_id: device_id,
+                            condition: condition,
+                            threshold: threshold_value,
+                            current_value: current_value,
+                            timestamp: new Date().toISOString()
+                        }
+                    });
+
+                    // Ativar o lock para evitar alertas repetitivos
+                    // Deletar alerta antigo e recriar com lock = true
+                    try {
+                        await resources.devices.deleteDeviceData(group_device_id, { ids: [alert_data.id] });
+                        await resources.devices.sendDeviceData(group_device_id, {
+                            variable: "alertas",
+                            value: alert_data.value,
+                            group: alert_data.group,
+                            metadata: {
+                                ...alert_metadata,
+                                lock: true
+                            }
+                        });
+                        context.log(`Alert lock activated for ${alert_variable}`);
+                    } catch (err) {
+                        context.log(`Error updating lock: ${err}`);
+                    }
+                }
+            } else {
+                // Condição não atendida - resetar o lock se estiver ativado
+                const is_locked = alert_metadata.lock === true;
+                
+                if (is_locked) {
+                    context.log(`Condition not met - resetting lock for ${alert_variable}`);
+                    // Deletar alerta antigo e recriar com lock = false
+                    try {
+                        await resources.devices.deleteDeviceData(group_device_id, { ids: [alert_data.id] });
+                        await resources.devices.sendDeviceData(group_device_id, {
+                            variable: "alertas",
+                            value: alert_data.value,
+                            group: alert_data.group,
+                            metadata: {
+                                ...alert_metadata,
+                                lock: false
+                            }
+                        });
+                        context.log(`Alert lock reset for ${alert_variable} - ready for next trigger`);
+                    } catch (err) {
+                        context.log(`Error resetting lock: ${err}`);
+                    }
+                }
             }
         } catch (error) {
             context.log(`Error checking alert for device ${device_id}: ${error}`);

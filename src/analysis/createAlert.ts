@@ -7,6 +7,7 @@ interface AlertData {
     alert_device?: string;
     aler_email?: boolean;
     alert_send_to?: string;
+    checkin_time?: number;  // Tempo em horas para alerta de checkin
 }
 
 async function createAlert(context: any, scope: any[]) {
@@ -52,15 +53,29 @@ async function createAlert(context: any, scope: any[]) {
                 case 'alert_send_to':
                     alertData.alert_send_to = item.value as string;
                     break;
+                case 'checkin_time':
+                    alertData.checkin_time = Number(item.value);
+                    break;
             }
         }
     }
 
     context.log("Alert data extracted:", alertData);
 
+    // Verificar se é alerta de checkin
+    const is_checkin_alert = alertData.alert_variable === 'checkin';
+
     // Validar dados obrigatórios
-    if (!alertData.alert_variable || !alertData.alert_condition || alertData.alert_value === undefined || !alertData.alert_device) {
-        return context.log("Missing required alert fields");
+    if (is_checkin_alert) {
+        // Para alerta de checkin, precisa de: alert_variable, alert_device, checkin_time
+        if (!alertData.alert_variable || !alertData.alert_device || !alertData.checkin_time) {
+            return context.log("Missing required fields for checkin alert");
+        }
+    } else {
+        // Para alertas normais, precisa de: alert_variable, condition, value, device
+        if (!alertData.alert_variable || !alertData.alert_condition || alertData.alert_value === undefined || !alertData.alert_device) {
+            return context.log("Missing required alert fields");
+        }
     }
 
     // Verificar se o usuário é admin (sem limite de alertas)
@@ -87,35 +102,40 @@ async function createAlert(context: any, scope: any[]) {
         }
     }
 
-    // Verificar limite de alertas apenas para não-admins (máximo 10 por device)
-    // Buscar o group_id do dispositivo a ser monitorado
-    let group_device_id_for_limit = null;
-    
-    try {
-        const device_info_temp = await resources.devices.info(alertData.alert_device);
-        const group_id_tag_temp = device_info_temp.tags?.find((tag: any) => tag.key === "group_id");
+    // Verificar limite de alertas apenas para não-admins (máximo 10 alertas por usuário)
+    if (!is_admin) {
+        // Buscar o group_id do dispositivo a ser monitorado
+        let group_device_id_for_limit = null;
         
-        if (group_id_tag_temp && group_id_tag_temp.value) {
-            group_device_id_for_limit = group_id_tag_temp.value;
+        try {
+            const device_info_temp = await resources.devices.info(alertData.alert_device);
+            const group_id_tag_temp = device_info_temp.tags?.find((tag: any) => tag.key === "group_id");
+            
+            if (group_id_tag_temp && group_id_tag_temp.value) {
+                group_device_id_for_limit = group_id_tag_temp.value;
+            } else {
+                context.log("No group_id tag found for alert device - cannot verify alert limit");
+                return context.log("Cannot create alert: unable to verify alert limit");
+            }
+        } catch (error) {
+            context.log("Error fetching group_id for limit check:", error);
+            return context.log("Cannot create alert: unable to verify alert limit");
         }
-    } catch (error) {
-        context.log("Error fetching group_id for limit check:", error);
-    }
 
-    if (!is_admin && group_device_id_for_limit) {
+        // Verificar alertas existentes do usuário
         try {
             const existing_alerts = await resources.devices.getDeviceData(group_device_id_for_limit, {
                 variables: ["alertas"],
                 qty: 9999
             });
 
-            // Filtrar apenas alertas para este dispositivo específico
-            const device_specific_alerts = existing_alerts.filter((alert: any) => 
-                alert.metadata && alert.metadata.device_id === alertData.alert_device
+            // Filtrar apenas alertas deste usuário específico (independente do dispositivo)
+            const user_alerts = existing_alerts.filter((alert: any) => 
+                alert.metadata && alert.metadata.send_to === alertData.alert_send_to
             );
 
-            if (device_specific_alerts.length >= 10) {
-                context.log(`Alert limit reached: ${device_specific_alerts.length}/10 alerts already exist for device ${alertData.alert_device}`);
+            if (user_alerts.length >= 10) {
+                context.log(`Alert limit reached: ${user_alerts.length}/10 alerts already exist for user ${alertData.alert_send_to}`);
                 
                 // Enviar notificação ao usuário sobre o limite
                 if (alertData.alert_send_to) {
@@ -129,14 +149,19 @@ async function createAlert(context: any, scope: any[]) {
                     }
                 }
                 
-                return context.log("Cannot create alert: maximum limit of 10 alerts reached");
+                return context.log("Cannot create alert: maximum limit of 10 alerts reached for this user");
             }
 
-            context.log(`Current alerts for device ${alertData.alert_device}: ${device_specific_alerts.length}/10`);
+            context.log(`Current alerts for user ${alertData.alert_send_to}: ${user_alerts.length}/10`);
         } catch (error) {
             context.log("Error checking alert limit:", error);
+            return context.log("Cannot create alert: unable to verify alert limit");
         }
     }
+
+    // Buscar o group_id do dispositivo a ser monitorado (nas tags)
+    const device_info = await resources.devices.info(alertData.alert_device);
+    const device_name = device_info.name || alertData.alert_device;
 
     // Mapear condições para texto legível
     const conditionMap: { [key: string]: string } = {
@@ -148,13 +173,15 @@ async function createAlert(context: any, scope: any[]) {
         "<=": "menor ou igual a"
     };
 
-    const condition_text = conditionMap[alertData.alert_condition] || alertData.alert_condition;
-
     // Criar descrição legível do alerta
-    const alert_description = `Alerta criado para a variável ${alertData.alert_variable} quando o seu valor for ${condition_text} ${alertData.alert_value}${user_name ? ` e será enviado para o usuário ${user_name}` : ''}`;
-
-    // Buscar o group_id do dispositivo a ser monitorado (nas tags)
-    const device_info = await resources.devices.info(alertData.alert_device);
+    let alert_description: string;
+    
+    if (is_checkin_alert) {
+        alert_description = `Alerta de checkin criado para monitorar comunicação do dispositivo. Notificação será enviada se o dispositivo ficar ${alertData.checkin_time} horas sem comunicar${user_name ? ` e será enviado para o usuário ${user_name}` : ''}`;
+    } else {
+        const condition_text = conditionMap[alertData.alert_condition!] || alertData.alert_condition;
+        alert_description = `Alerta para o(a) ${alertData.alert_variable} do(a) ${device_name} quando o seu valor for ${condition_text} ${alertData.alert_value}${user_name ? ` será enviado para o usuário ${user_name}` : ''}`;
+    }
     const group_id_tag = device_info.tags?.find((tag: any) => tag.key === "group_id");
 
     if (!group_id_tag || !group_id_tag.value) {
@@ -164,21 +191,34 @@ async function createAlert(context: any, scope: any[]) {
     const group_device_id = group_id_tag.value;
     context.log(`Saving alert in group device: ${group_device_id} for sensor: ${alertData.alert_device}`);
 
+    // Preparar metadata baseado no tipo de alerta
+    const alert_metadata: any = {
+        alert_variable: alertData.alert_variable,
+        device_id: alertData.alert_device,
+        send_to: alertData.alert_send_to,
+        email_enabled: alertData.aler_email || false,
+        created_at: new Date().toISOString(),
+        description: alert_description,
+        created_by: device_id,
+        lock: false
+    };
+
+    if (is_checkin_alert) {
+        // Metadata específico para alerta de checkin
+        alert_metadata.checkin_time = alertData.checkin_time;
+        alert_metadata.alert_type = 'checkin';
+    } else {
+        // Metadata específico para alerta normal
+        alert_metadata.condition = alertData.alert_condition;
+        alert_metadata.threshold_value = alertData.alert_value;
+        alert_metadata.alert_type = 'normal';
+    }
+
     // Salvar alerta no dispositivo do grupo
     await resources.devices.sendDeviceData(group_device_id, {
         variable: "alertas",
         value: 'enabled',
-        metadata: {
-            alert_variable: alertData.alert_variable,
-            condition: alertData.alert_condition,
-            threshold_value: alertData.alert_value,
-            device_id: alertData.alert_device, // ID do dispositivo sensor a ser monitorado
-            send_to: alertData.alert_send_to,
-            email_enabled: alertData.aler_email || false,
-            created_at: new Date().toISOString(),
-            description: alert_description,
-            created_by: device_id  // Salvar quem criou o alerta
-        }
+        metadata: alert_metadata
     });
 
     context.log(`Alert created successfully with group: ${group_id}`);
@@ -186,9 +226,13 @@ async function createAlert(context: any, scope: any[]) {
     // Enviar notificação de confirmação se houver usuário
     if (alertData.alert_send_to) {
         try {
+            const notification_message = is_checkin_alert 
+                ? `Novo alerta de checkin criado. Você será notificado se o dispositivo ficar ${alertData.checkin_time} horas sem comunicar.`
+                : `Novo alerta criado para monitorar o(a) ${alertData.alert_variable} no(a) ${device_name}`;
+            
             await resources.run.notificationCreate(alertData.alert_send_to, {
                 title: "Alerta Criado",
-                message: `Novo alerta criado para monitorar a variável ${alertData.alert_variable} no dispositivo`
+                message: notification_message
             });
         } catch (error) {
             context.log("Error sending notification:", error);
