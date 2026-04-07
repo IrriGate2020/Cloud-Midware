@@ -10,6 +10,28 @@ interface AlertData {
     checkin_time?: number;  // Tempo em horas para alerta de checkin
 }
 
+// Mapeamento de variáveis para labels
+const variableLabels: { [key: string]: string } = {
+    'OUTST': 'Acionamento: Ligou(1) - Desligou(0)',
+    'checkin': 'IrrigaPay: Ligou(1) - Desligou(0)',
+    'ONDUR': 'Duração do Acionamento',
+    'ERRO': 'Erro de Leitura do Sensor',
+    'HUM': 'Umidade',
+    'TEMP': 'Temperatura',
+    'PW': 'EC do Solo',
+    'CON': 'EC da Água',
+    'NIT': 'Nitrogênio',
+    'PHO': 'Fósforo',
+    'POT': 'Potássio',
+    'LUX': 'Luminosidade',
+    'Ph': 'Ph'
+};
+
+// Função para obter o label da variável
+function getVariableLabel(variable: string): string {
+    return variableLabels[variable] || variable;
+}
+
 async function createAlert(context: any, scope: any[]) {
     console.log("Running Analysis - Creating Alert");
     console.log(scope);
@@ -175,12 +197,13 @@ async function createAlert(context: any, scope: any[]) {
 
     // Criar descrição legível do alerta
     let alert_description: string;
+    const variable_label = getVariableLabel(alertData.alert_variable!);
     
     if (is_checkin_alert) {
         alert_description = `Alerta de checkin criado para monitorar comunicação do dispositivo. Notificação será enviada se o dispositivo ficar ${alertData.checkin_time} horas sem comunicar${user_name ? ` e será enviado para o usuário ${user_name}` : ''}`;
     } else {
         const condition_text = conditionMap[alertData.alert_condition!] || alertData.alert_condition;
-        alert_description = `Alerta para o(a) ${alertData.alert_variable} do(a) ${device_name} quando o seu valor for ${condition_text} ${alertData.alert_value}${user_name ? ` será enviado para o usuário ${user_name}` : ''}`;
+        alert_description = `Alerta para ${variable_label} do(a) ${device_name} quando o seu valor for ${condition_text} ${alertData.alert_value}${user_name ? ` será enviado para o usuário ${user_name}` : ''}`;
     }
     const group_id_tag = device_info.tags?.find((tag: any) => tag.key === "group_id");
 
@@ -228,7 +251,7 @@ async function createAlert(context: any, scope: any[]) {
         try {
             const notification_message = is_checkin_alert 
                 ? `Novo alerta de checkin criado. Você será notificado se o dispositivo ficar ${alertData.checkin_time} horas sem comunicar.`
-                : `Novo alerta criado para monitorar o(a) ${alertData.alert_variable} no(a) ${device_name}`;
+                : `Novo alerta criado para monitorar ${variable_label} no(a) ${device_name}`;
             
             await resources.run.notificationCreate(alertData.alert_send_to, {
                 title: "Alerta Criado",

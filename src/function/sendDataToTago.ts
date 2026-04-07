@@ -32,6 +32,31 @@ async function sendDataToTago(data: any) {
   const fertData = data?.data?.fert;
   const out = data?.data?.Out;
 
+
+
+  const token = await tago_server_udp
+    .get_token(centralNumber)
+    .catch((e: any) => {
+      //console.error(e);
+    });
+  if (!token) {
+    console.debug(`Dispositivo nao encontrado com o serial: ${centralNumber}`);
+  }
+  const device = new Device({ token: token });
+  if (!device) {
+    console.debug(`Device not found, Serial Number: ${centralNumber}`);
+  }
+
+  if (device) {
+    const dataCentral: any[] = [
+      {
+        variable: "dataCentral",
+        value: data,
+      },
+    ];
+    await device.sendData(dataCentral).then(console.log).catch(console.error);
+  }
+
   for (const sensor in sensorData) {
     const sensorNumber = sensor;
     const serialNumber = `${centralNumber}_${sensorNumber}`;

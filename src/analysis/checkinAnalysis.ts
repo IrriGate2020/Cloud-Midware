@@ -12,6 +12,28 @@ interface CheckinAlertMetadata {
     lock?: boolean;
 }
 
+// Mapeamento de variáveis para labels
+const variableLabels: { [key: string]: string } = {
+    'OUTST': 'Acionamento: Ligou(1) - Desligou(0)',
+    'checkin': 'IrrigaPay: Ligou(1) - Desligou(0)',
+    'ONDUR': 'Duração do Acionamento',
+    'ERRO': 'Erro de Leitura do Sensor',
+    'HUM': 'Umidade',
+    'TEMP': 'Temperatura',
+    'PW': 'EC do Solo',
+    'CON': 'EC da Água',
+    'NIT': 'Nitrogênio',
+    'PHO': 'Fósforo',
+    'POT': 'Potássio',
+    'LUX': 'Luminosidade',
+    'Ph': 'Ph'
+};
+
+// Função para obter o label da variável
+function getVariableLabel(variable: string): string {
+    return variableLabels[variable] || variable;
+}
+
 async function checkinAnalysis(context: any, scope: any[]) {
     context.log("Starting Checkin Analysis - Checking device communication");
 
@@ -129,11 +151,14 @@ async function checkinAnalysis(context: any, scope: any[]) {
                             }
 
                             // Registrar o disparo do alerta
+                            const variable_label = getVariableLabel('checkin');
                             await resources.devices.sendDeviceData(group_device_id, {
                                 variable: "alert_triggered",
-                                value: "checkin",
+                                value: variable_label,
                                 metadata: {
                                     alert_type: "checkin",
+                                    alert_variable: "checkin",
+                                    alert_variable_label: variable_label,
                                     device_id: device_id,
                                     hours_offline: hours_offline,
                                     checkin_time: checkin_time_hours,

@@ -12,6 +12,28 @@ interface AlertMetadata {
     lock?: boolean;  // Sistema de lock para evitar alertas repetitivos
 }
 
+// Mapeamento de variáveis para labels
+const variableLabels: { [key: string]: string } = {
+    'OUTST': 'Acionamento: Ligou(1) - Desligou(0)',
+    'checkin': 'IrrigaPay: Ligou(1) - Desligou(0)',
+    'ONDUR': 'Duração do Acionamento',
+    'ERRO': 'Erro de Leitura do Sensor',
+    'HUM': 'Umidade',
+    'TEMP': 'Temperatura',
+    'PW': 'EC do Solo',
+    'CON': 'EC da Água',
+    'NIT': 'Nitrogênio',
+    'PHO': 'Fósforo',
+    'POT': 'Potássio',
+    'LUX': 'Luminosidade',
+    'Ph': 'Ph'
+};
+
+// Função para obter o label da variável
+function getVariableLabel(variable: string): string {
+    return variableLabels[variable] || variable;
+}
+
 async function alertAnalysis(context: any, scope: any[]) {
     if (!scope.length) {
         return context.log("No data in scope");
@@ -157,10 +179,11 @@ async function alertAnalysis(context: any, scope: any[]) {
                         try {
                             // Buscar nome do dispositivo
                             const device_name = device_info.name || device_id;
+                            const variable_label = getVariableLabel(alert_variable);
                             
                             await resources.run.notificationCreate(alert_metadata.send_to, {
-                                title: `Alerta: ${alert_variable}`,
-                                message: `A condição do alerta foi atingida para o(a) ${device_name}: ${alert_variable} ${condition} ${threshold_value}. Valor atual: ${current_value}`
+                                title: `Alerta: ${variable_label}`,
+                                message: `A condição do alerta foi atingida para o(a) ${device_name}: ${variable_label} ${condition} ${threshold_value}. Valor atual: ${current_value}`
                             });
                             context.log(`Push notification sent to user ${alert_metadata.send_to}`);
                         } catch (error) {
@@ -176,12 +199,14 @@ async function alertAnalysis(context: any, scope: any[]) {
                     }
 
                     // Registrar o disparo do alerta no dispositivo do grupo
+                    const variable_label = getVariableLabel(alert_variable);
                     await resources.devices.sendDeviceData(group_device_id, {
                         variable: "alert_triggered",
-                        value: alert_variable,
+                        value: variable_label,
                         metadata: {
                             alert_group: alert_data.group,
                             alert_variable: alert_variable,
+                            alert_variable_label: variable_label,
                             device_id: device_id,
                             condition: condition,
                             threshold: threshold_value,
