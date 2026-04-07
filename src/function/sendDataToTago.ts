@@ -25,35 +25,79 @@ function mergeArraysWithIdAndTime(firstArray: any, secondArray: any) {
 }
 
 async function sendDataToTago(data: any) {
-  data = JSON.parse(data);
+  try {
+    data = JSON.parse(data);
+  } catch (error) {
+    console.error('Erro ao fazer parse do JSON:', error);
+    return;
+  }
+
+  // Validar se a mensagem tem o campo SN (serial number)
   const centralNumber = data.SN;
+  if (!centralNumber) {
+    console.debug('Mensagem ignorada: não contém campo SN (serial number)');
+    return;
+  }
+
   const sensorData = data?.data?.sens;
   const timeData = data?.data?.Time;
   const fertData = data?.data?.fert;
   const out = data?.data?.Out;
 
-
-
+  // Buscar token do dispositivo central
   const token = await tago_server_udp
     .get_token(centralNumber)
     .catch((e: any) => {
       //console.error(e);
     });
+  
   if (!token) {
     console.debug(`Dispositivo nao encontrado com o serial: ${centralNumber}`);
-  }
-  const device = new Device({ token: token });
-  if (!device) {
-    console.debug(`Device not found, Serial Number: ${centralNumber}`);
+    return;
   }
 
-  if (device) {
+  const device = new Device({ token: token });
+  
+  if (!device) {
+    console.debug(`Device not found, Serial Number: ${centralNumber}`);
+    return;
+  }
+
+  // Enviar data_central com JSON stringificado e variáveis específicas do status
+  if (device && token) {
     const dataCentral: any[] = [
       {
-        variable: "dataCentral",
-        value: data,
+        variable: "data_central",
+        value: JSON.stringify(data),
       },
     ];
+
+    // Adicionar sboia1, sboia2 e tempInt se existirem
+    const sboia = data?.data?.status?.sboia;
+    const tempInt = data?.data?.status?.tempInt;
+
+    if (sboia && Array.isArray(sboia)) {
+      if (typeof sboia[0] !== 'undefined') {
+        dataCentral.push({
+          variable: "sboia1",
+          value: sboia[0],
+        });
+      }
+      if (typeof sboia[1] !== 'undefined') {
+        dataCentral.push({
+          variable: "sboia2",
+          value: sboia[1],
+        });
+      }
+    }
+
+    if (typeof tempInt !== 'undefined') {
+      dataCentral.push({
+        variable: "tempInt",
+        value: tempInt,
+      });
+    }
+
     await device.sendData(dataCentral).then(console.log).catch(console.error);
   }
 
@@ -315,6 +359,7 @@ async function sendDataToTago(data: any) {
       });
     if (!token) {
       console.debug(`Dispositivo nao encontrado com o serial para o output: ${serialNumber}`);
+      return;
     }
     const device = new Device({ token: token });
     if (!device) {
@@ -346,7 +391,7 @@ async function sendDataToTago(data: any) {
       if (!oldDataOut) {
         await device.sendData({ variable: variableName, value: arrayOutput[i], group: serialNumber }).then(console.log).catch(console.error);
       } else {
-        await device.editData({ id: oldDataOut.id, value: arrayOutput[i] })
+        await device.editData({ id: oldDataOut.id, value: arrayOutput[i] }).then(console.log).catch(console.error);
       }
     }
   }

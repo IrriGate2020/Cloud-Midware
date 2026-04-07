@@ -16,6 +16,8 @@ const { execSync } = require('child_process');
 const ANALYSIS_FILES = [
   'createAlert',
   'alertAnalysis',
+  'createAlertCentral',
+  'alertAnalysisCentral',
   'timerDuration'
 ];
 
