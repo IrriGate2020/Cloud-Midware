@@ -213,6 +213,169 @@ async function checkinAnalysis(context: any, scope: any[]) {
             }
         }
 
+        // 4. Buscar centrais e verificar alertas de checkin nelas
+        context.log("Checking checkin alerts for central devices...");
+        
+        const central_devices = all_devices.filter((device: any) => {
+            const type_tag = device.tags?.find((tag: any) => tag.key === "device_type");
+            return type_tag && type_tag.value === "central";
+        });
+
+        context.log(`Found ${central_devices.length} central devices to check`);
+
+        // 5. Para cada central, buscar alertas de checkin configurados
+        for (const central_device of central_devices) {
+            const central_device_id = central_device.id;
+            context.log(`Checking alerts for central device: ${central_device_id}`);
+
+            // Buscar todos os alertas da central
+            const all_alerts_data = await resources.devices.getDeviceData(central_device_id, {
+                variables: ["alertas"],
+                qty: 9999
+            });
+
+            if (!all_alerts_data.length) {
+                context.log(`No alerts configured in central device ${central_device_id}`);
+                continue;
+            }
+
+            // Filtrar apenas alertas de checkin de centrais
+            const central_checkin_alerts = all_alerts_data.filter((alert) => {
+                const alert_metadata = alert.metadata as CheckinAlertMetadata;
+                return alert_metadata && alert_metadata.alert_type === 'checkin_central' && alert.value === 'enabled';
+            });
+
+            if (!central_checkin_alerts.length) {
+                context.log(`No checkin alerts configured for central ${central_device_id}`);
+                continue;
+            }
+
+            context.log(`Found ${central_checkin_alerts.length} checkin alerts in central ${central_device_id}`);
+
+            // 6. Processar cada alerta de checkin da central
+            for (const alert_data of central_checkin_alerts) {
+                const alert_metadata = alert_data.metadata as CheckinAlertMetadata;
+                const device_id = alert_metadata.device_id;
+                const checkin_time_hours = alert_metadata.checkin_time;
+
+                context.log(`Checking central ${device_id} - should communicate within ${checkin_time_hours} hours`);
+
+                try {
+                    // Buscar última comunicação da central (qualquer variável)
+                    const last_data = await resources.devices.getDeviceData(device_id, {
+                        qty: 1
+                    });
+
+                    let is_offline = false;
+                    let hours_offline = 0;
+
+                    if (!last_data.length) {
+                        context.log(`No data found for central ${device_id} - considering offline`);
+                        is_offline = true;
+                    } else {
+                        const last_communication = new Date(last_data[0].time);
+                        const now = new Date();
+                        const time_diff_ms = now.getTime() - last_communication.getTime();
+                        hours_offline = time_diff_ms / (1000 * 60 * 60);
+
+                        context.log(`Central ${device_id} last communication: ${last_communication.toISOString()} (${hours_offline.toFixed(2)} hours ago)`);
+
+                        // Verificar se passou o tempo configurado
+                        if (hours_offline >= checkin_time_hours) {
+                            is_offline = true;
+                        }
+                    }
+
+                    const is_locked = alert_metadata.lock === true;
+
+                    if (is_offline) {
+                        // Central está offline
+                        context.log(`Central ${device_id} is offline for ${hours_offline.toFixed(2)} hours`);
+
+                        if (is_locked) {
+                            context.log(`Alert is locked - skipping notification to avoid spam`);
+                        } else {
+                            // Enviar notificação
+                            context.log(`Sending notification - central ${device_id} is not communicating`);
+
+                            if (alert_metadata.send_to) {
+                                try {
+                                    // Buscar info da central para nome
+                                    const device_info = await resources.devices.info(device_id);
+                                    const device_name = device_info.name || device_id;
+
+                                    await resources.run.notificationCreate(alert_metadata.send_to, {
+                                        title: `Alerta: Central Sem Comunicação`,
+                                        message: `A central ${device_name} está sem comunicar há ${hours_offline.toFixed(1)} horas (limite: ${checkin_time_hours}h)`
+                                    });
+                                    context.log(`Notification sent to user ${alert_metadata.send_to}`);
+                                } catch (error) {
+                                    context.log(`Error sending notification: ${error}`);
+                                }
+                            }
+
+                            // Registrar o disparo do alerta
+                            await resources.devices.sendDeviceData(central_device_id, {
+                                variable: "alert_triggered",
+                                value: "Comunicação da Central",
+                                metadata: {
+                                    alert_type: "checkin_central",
+                                    alert_variable: "checkin",
+                                    alert_variable_label: "Comunicação da Central",
+                                    device_id: device_id,
+                                    hours_offline: hours_offline,
+                                    checkin_time: checkin_time_hours,
+                                    timestamp: new Date().toISOString()
+                                }
+                            });
+
+                            // Ativar o lock
+                            try {
+                                await resources.devices.deleteDeviceData(central_device_id, { ids: [alert_data.id] });
+                                await resources.devices.sendDeviceData(central_device_id, {
+                                    variable: "alertas",
+                                    value: alert_data.value,
+                                    group: alert_data.group,
+                                    metadata: {
+                                        ...alert_metadata,
+                                        lock: true
+                                    }
+                                });
+                                context.log(`Checkin alert lock activated for central ${device_id}`);
+                            } catch (err) {
+                                context.log(`Error updating lock: ${err}`);
+                            }
+                        }
+                    } else {
+                        // Central está comunicando normalmente
+                        context.log(`Central ${device_id} is online - last communication ${hours_offline.toFixed(2)} hours ago`);
+
+                        // Se o lock estava ativo, resetar
+                        if (is_locked) {
+                            context.log(`Central is back online - resetting lock for central ${device_id}`);
+                            try {
+                                await resources.devices.deleteDeviceData(central_device_id, { ids: [alert_data.id] });
+                                await resources.devices.sendDeviceData(central_device_id, {
+                                    variable: "alertas",
+                                    value: alert_data.value,
+                                    group: alert_data.group,
+                                    metadata: {
+                                        ...alert_metadata,
+                                        lock: false
+                                    }
+                                });
+                                context.log(`Checkin alert lock reset for central ${device_id} - ready for next trigger`);
+                            } catch (err) {
+                                context.log(`Error resetting lock: ${err}`);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    context.log(`Error checking central ${device_id}: ${error}`);
+                }
+            }
+        }
+
         context.log("Checkin analysis completed");
     } catch (error) {
         context.log(`Error in checkin analysis: ${error}`);

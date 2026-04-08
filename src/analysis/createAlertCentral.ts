@@ -7,14 +7,16 @@ interface AlertData {
     alert_device?: string;
     aler_email?: boolean;
     alert_send_to?: string;
+    checkin_time?: number;  // Tempo em horas para alerta de checkin
 }
 
 // Mapeamento de variáveis para labels das centrais
 const variableLabels: { [key: string]: string } = {
     'sboia': 'Status Boia - Caixa cheia (1), Caixa vazia(0)',
-    'sboia1': 'Status Boia - Caixa cheia (1), Caixa vazia(0)',
-    'sboia2': 'Status Boia - Caixa cheia (1), Caixa vazia(0)',
-    'tempInt': 'Temperatura Interna'
+    'sboia1': 'Status Boia 1 - Caixa cheia (1), Caixa vazia(0)',
+    'sboia2': 'Status Boia 2 - Caixa cheia (1), Caixa vazia(0)',
+    'tempInt': 'Temperatura Interna',
+    'checkin': 'Comunicação da Central'
 };
 
 // Função para obter o label da variável
@@ -36,6 +38,8 @@ async function createAlertCentral(context: any, scope: any[]) {
     // Extrair dados do scope baseado no grupo
     const group_id = scope[0].group;
     const device_id = scope[0].device;
+    
+    context.log(`Received scope - group_id: ${group_id}, device_id: ${device_id}`);
 
     if (!group_id) {
         return context.log("No group ID found in scope");
@@ -65,15 +69,31 @@ async function createAlertCentral(context: any, scope: any[]) {
                 case 'alert_send_to':
                     alertData.alert_send_to = item.value as string;
                     break;
+                case 'checkin_time':
+                    alertData.checkin_time = Number(item.value);
+                    break;
             }
         }
     }
 
     context.log("Alert data extracted:", alertData);
+    
+    context.log(`Target device for alert: ${alertData.alert_device}`);
 
-    // Validar dados obrigatórios (alertas de central não têm checkin)
-    if (!alertData.alert_variable || !alertData.alert_condition || alertData.alert_value === undefined || !alertData.alert_device) {
-        return context.log("Missing required alert fields");
+    // Verificar se é alerta de checkin
+    const is_checkin_alert = alertData.alert_variable === 'checkin';
+
+    // Validar dados obrigatórios
+    if (is_checkin_alert) {
+        // Para alerta de checkin, precisa de: alert_variable, alert_device, checkin_time
+        if (!alertData.alert_variable || !alertData.alert_device || !alertData.checkin_time) {
+            return context.log("Missing required fields for checkin alert");
+        }
+    } else {
+        // Para alertas normais, precisa de: alert_variable, condition, value, device
+        if (!alertData.alert_variable || !alertData.alert_condition || alertData.alert_value === undefined || !alertData.alert_device) {
+            return context.log("Missing required alert fields");
+        }
     }
 
     // Verificar se o usuário é admin (sem limite de alertas)
@@ -146,20 +166,26 @@ async function createAlertCentral(context: any, scope: any[]) {
     const device_info = await resources.devices.info(alertData.alert_device);
     const device_name = device_info.name || alertData.alert_device;
 
-    // Mapear condições para texto legível
-    const conditionMap: { [key: string]: string } = {
-        "==": "igual a",
-        "!=": "diferente de",
-        ">": "maior que",
-        "<": "menor que",
-        ">=": "maior ou igual a",
-        "<=": "menor ou igual a"
-    };
-
     // Criar descrição legível do alerta
-    const variable_label = getVariableLabel(alertData.alert_variable!);
-    const condition_text = conditionMap[alertData.alert_condition!] || alertData.alert_condition;
-    const alert_description = `Alerta para ${variable_label} do(a) ${device_name} quando o seu valor for ${condition_text} ${alertData.alert_value}${user_name ? ` será enviado para o usuário ${user_name}` : ''}`;
+    let alert_description: string;
+    
+    if (is_checkin_alert) {
+        alert_description = `Alerta de checkin criado para monitorar comunicação da central. Notificação será enviada se o dispositivo ficar ${alertData.checkin_time} horas sem comunicar${user_name ? ` e será enviado para o usuário ${user_name}` : ''}`;
+    } else {
+        // Mapear condições para texto legível
+        const conditionMap: { [key: string]: string } = {
+            "==": "igual a",
+            "!=": "diferente de",
+            ">":  "maior que",
+            "<":  "menor que",
+            ">=": "maior ou igual a",
+            "<=": "menor ou igual a"
+        };
+        
+        const variable_label = getVariableLabel(alertData.alert_variable!);
+        const condition_text = conditionMap[alertData.alert_condition!] || alertData.alert_condition;
+        alert_description = `Alerta para ${variable_label} do(a) ${device_name} quando o seu valor for ${condition_text} ${alertData.alert_value}${user_name ? ` será enviado para o usuário ${user_name}` : ''}`;
+    }
 
     // Preparar metadata do alerta
     const alert_metadata: any = {
@@ -171,24 +197,56 @@ async function createAlertCentral(context: any, scope: any[]) {
         description: alert_description,
         created_by: device_id,
         lock: false,
-        condition: alertData.alert_condition,
-        threshold_value: alertData.alert_value,
-        alert_type: 'central'
+        alert_type: is_checkin_alert ? 'checkin_central' : 'central'
     };
 
+    if (is_checkin_alert) {
+        // Metadata específico para alerta de checkin
+        alert_metadata.checkin_time = alertData.checkin_time;
+    } else {
+        // Metadata específico para alertas normais
+        alert_metadata.condition = alertData.alert_condition;
+        alert_metadata.threshold_value = alertData.alert_value;
+    }
+
     // Salvar alerta no próprio dispositivo central
-    await resources.devices.sendDeviceData(alertData.alert_device, {
-        variable: "alertas",
-        value: 'enabled',
-        metadata: alert_metadata
-    });
+    context.log(`Saving alert to device: ${alertData.alert_device}`);
+    context.log(`Alert metadata:`, JSON.stringify(alert_metadata, null, 2));
+    
+    try {
+        await resources.devices.sendDeviceData(alertData.alert_device, {
+            variable: "alertas",
+            value: 'enabled',
+            metadata: alert_metadata
+        });
+        context.log(`Alert successfully saved to device ${alertData.alert_device}`);
+        
+        // Verificar se o alerta foi realmente salvo
+        const verification = await resources.devices.getDeviceData(alertData.alert_device, {
+            variables: ["alertas"],
+            qty: 1
+        });
+        
+        if (verification.length > 0) {
+            context.log(`Verification: Alert found in device! Last alert ID: ${verification[0].id}`);
+        } else {
+            context.log(`WARNING: Alert was sent but not found in device data!`);
+        }
+        
+    } catch (error) {
+        context.log(`ERROR saving alert to device: ${error}`);
+        throw error;
+    }
 
     context.log(`Central alert created successfully with group: ${group_id}`);
     
     // Enviar notificação de confirmação se houver usuário
     if (alertData.alert_send_to) {
         try {
-            const notification_message = `Novo alerta criado para monitorar ${variable_label} no(a) ${device_name}`;
+            const variable_label = getVariableLabel(alertData.alert_variable!);
+            const notification_message = is_checkin_alert 
+                ? `Novo alerta de checkin criado para monitorar comunicação do(a) ${device_name}`
+                : `Novo alerta criado para monitorar ${variable_label} no(a) ${device_name}`;
             
             await resources.run.notificationCreate(alertData.alert_send_to, {
                 title: "Alerta Criado",

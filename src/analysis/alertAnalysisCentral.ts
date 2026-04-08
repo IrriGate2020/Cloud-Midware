@@ -16,8 +16,8 @@ interface AlertMetadata {
 // Mapeamento de variáveis para labels das centrais
 const variableLabels: { [key: string]: string } = {
     'sboia': 'Status Boia - Caixa cheia (1), Caixa vazia(0)',
-    'sboia1': 'Status Boia - Caixa cheia (1), Caixa vazia(0)',
-    'sboia2': 'Status Boia - Caixa cheia (1), Caixa vazia(0)',
+    'sboia1': 'Status Boia 1 - Caixa cheia (1), Caixa vazia(0)',
+    'sboia2': 'Status Boia 2 - Caixa cheia (1), Caixa vazia(0)',
     'tempInt': 'Temperatura Interna'
 };
 
