@@ -1,0 +1,11 @@
+{
+  "name": "tagoio-support-widget",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "../timer-widget/node_modules/.bin/webpack --mode production && node scripts/inline-dist.js",
+    "dev": "../timer-widget/node_modules/.bin/webpack serve --mode development",
+    "start": "../timer-widget/node_modules/.bin/webpack serve --mode development"
+  },
+  "devDependencies": {}
+}

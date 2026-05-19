@@ -26,7 +26,7 @@ const variableLabels: { [key: string]: string } = {
     'PHO': 'Fósforo',
     'POT': 'Potássio',
     'LUX': 'Luminosidade',
-    'Ph': 'Ph'
+    'PH': 'percentual de Hidrogênio'
 };
 
 // Função para obter o label da variável
