@@ -1,7 +1,6 @@
 const path = require("path");
 
-const sharedNodeModules = path.resolve(__dirname, "../timer-widget/node_modules");
-const HtmlWebpackPlugin = require(path.join(sharedNodeModules, "html-webpack-plugin"));
+const HtmlWebpackPlugin = require("html-webpack-plugin");
 
 module.exports = {
   entry: "./src/index.ts",
@@ -12,10 +11,7 @@ module.exports = {
   },
   resolve: {
     extensions: [".ts", ".js"],
-    modules: [path.resolve(__dirname, "src"), sharedNodeModules, "node_modules"]
-  },
-  resolveLoader: {
-    modules: [sharedNodeModules, "node_modules"]
+    modules: [path.resolve(__dirname, "src"), "node_modules"]
   },
   module: {
     rules: [

@@ -46,12 +46,11 @@ type AsanaTask = {
 };
 
 const HARDCODED_CONFIG: SupportConfig = {
-  // Preencha estes valores antes de gerar o build para publicar na TagoIO.
   mode: "support-center",
   asanaToken: "",
-  asanaWorkspaceId: "",
-  asanaProjectId: "",
-  asanaAssignee: "",
+  asanaWorkspaceId: "1206375074805160",
+  asanaProjectId: "1214221794567142",
+  asanaAssignee: "kaua.cristovao@irrigate.com.br",
   whatsappNumber: "",
   companyName: "IrriGate2020"
 };

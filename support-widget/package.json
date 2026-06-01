@@ -3,9 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "../timer-widget/node_modules/.bin/webpack --mode production && node scripts/inline-dist.js",
-    "dev": "../timer-widget/node_modules/.bin/webpack serve --mode development",
-    "start": "../timer-widget/node_modules/.bin/webpack serve --mode development"
+    "build": "node_modules/node/bin/node node_modules/webpack/bin/webpack.js --mode production && node_modules/node/bin/node scripts/inline-dist.js",
+    "dev": "node_modules/node/bin/node node_modules/webpack/bin/webpack.js serve --mode development",
+    "start": "node_modules/node/bin/node node_modules/webpack/bin/webpack.js serve --mode development"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "html-webpack-plugin": "^5.0.0",
+    "node": "^20.0.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.0.0",
+    "webpack": "^5.0.0",
+    "webpack-cli": "^5.0.0",
+    "webpack-dev-server": "^4.0.0"
+  }
 }
