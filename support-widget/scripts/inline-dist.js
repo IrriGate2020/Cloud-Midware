@@ -13,3 +13,5 @@ const withoutBundleReference = html.replace(/<script defer="defer" src="bundle\.
 const inlinedHtml = withoutBundleReference.replace("</body>", `${scriptTag}</body>`);
 
 fs.writeFileSync(htmlPath, inlinedHtml);
+fs.writeFileSync(path.join(distDir, "support-center.html"), inlinedHtml);
+fs.writeFileSync(path.join(distDir, "support-asana-whatsapp.html"), inlinedHtml);

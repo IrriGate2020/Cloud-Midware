@@ -15,6 +15,70 @@ import axios from "axios";
 // Token da conta TagoIO com permissões para criar dispositivos
 // Este token deve ser configurado como variável de ambiente
 const ACCOUNT_TOKEN = "ff300c89-19a5-4446-9571-f276837dee18";
+const DEFAULT_RETENTION_DAYS = 30;
+
+const AUTO_TYPES: Record<number, string> = {
+    0: "Nenhuma",
+    1: "Irrigação",
+    2: "Climatização",
+    3: "Aquecimento",
+    4: "Nebulização",
+    5: "Monitoramento",
+    6: "Sombreamento Simples",
+    7: "Sombreamento Avançado",
+    8: "Cíclico",
+    9: "Iluminação"
+};
+
+function normalizeTagKey(value: any): string {
+    return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+
+function getTagValue(tags: any[] | undefined, key: string): string | undefined {
+    const wanted = normalizeTagKey(key);
+    const tag = (tags || []).find((item) => normalizeTagKey(item?.key) === wanted);
+    if (tag?.value === undefined || tag?.value === null || tag?.value === "") return undefined;
+    return String(tag.value);
+}
+
+function parseRetentionDays(value: any): number | null {
+    if (value === undefined || value === null || value === "") return null;
+    const parsed = Number(String(value).replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.floor(parsed);
+}
+
+function getRetentionDaysFromTags(tags: any[] | undefined): number | null {
+    return parseRetentionDays(
+        getTagValue(tags, "plan_retention_days") ||
+        getTagValue(tags, "custom_retention_days") ||
+        getTagValue(tags, "retention_days") ||
+        getTagValue(tags, "retencao_dias")
+    );
+}
+
+async function resolveRetentionDays(account: Account, centralDevice: any, organizationId?: string): Promise<number> {
+    const centralRetention = getRetentionDaysFromTags(centralDevice.tags);
+    if (centralRetention) return centralRetention;
+
+    if (organizationId) {
+        try {
+            const organizationDevice = await account.devices.info(organizationId);
+            const organizationRetention = getRetentionDaysFromTags(organizationDevice.tags);
+            if (organizationRetention) return organizationRetention;
+        } catch (_) {
+            // Algumas instalacoes ainda guardam organization_id como identificador logico, nao como ID do device.
+        }
+    }
+
+    return DEFAULT_RETENTION_DAYS;
+}
+
+function parseAutoValue(value: any): number | null {
+    if (value === undefined || value === null || value === "") return null;
+    const parsed = Number(String(value).replace(",", "."));
+    return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+}
 
 interface SensorData {
     MOD: number;
@@ -31,7 +95,8 @@ interface SensorData {
     PW?: string;
     SOL?: string;
     COMM?: number;
-    ERRO?: number;
+    Auto?: number | string;
+    ERRO?: Record<string, number>;
     [key: string]: any;
 }
 
@@ -109,8 +174,9 @@ export async function autoRegisterSensors(
         console.log(`✅ Central encontrada: ${centralDevice.name} (ID: ${centralDevice.id})`);
 
         // Extrai group_id e organization_id das tags da central
-        const groupId = centralDevice.tags?.find((tag: any) => tag.key === "group_id")?.value;
-        const organizationId = centralDevice.tags?.find((tag: any) => tag.key === "organization_id")?.value;
+        const groupId = getTagValue(centralDevice.tags, "group_id");
+        const organizationId = getTagValue(centralDevice.tags, "organization_id");
+        const retentionDays = await resolveRetentionDays(account, centralDevice, organizationId);
 
         if (!groupId) {
             console.warn(`⚠️ Tag 'group_id' não encontrada na central ${data.SN}`);
@@ -119,7 +185,7 @@ export async function autoRegisterSensors(
             console.warn(`⚠️ Tag 'organization_id' não encontrada na central ${data.SN}`);
         }
 
-        console.log(`📋 group_id: ${groupId}, organization_id: ${organizationId}`);
+        console.log(`📋 group_id: ${groupId}, organization_id: ${organizationId}, retenção=${retentionDays} dias`);
 
         // Cadastra cada sensor individualmente
         const sensorNumbers = Object.keys(data.data.sens);
@@ -139,6 +205,7 @@ export async function autoRegisterSensors(
                     sensorConfig,
                     groupId,
                     organizationId,
+                    retentionDays,
                     connectorId,
                     networkId
                 );
@@ -173,6 +240,7 @@ async function registerSensorDevice(
     sensorConfig: SensorData,
     groupId?: string,
     organizationId?: string,
+    retentionDays: number = DEFAULT_RETENTION_DAYS,
     connectorId?: string,
     networkId?: string
 ): Promise<void> {
@@ -195,6 +263,10 @@ async function registerSensorDevice(
         } catch (listError) {
             console.log(`⚠️ Erro ao verificar existência do sensor, continuando com criação...`);
         }
+
+        const autoValue = parseAutoValue(sensorConfig.Auto ?? sensorConfig.auto);
+        const autoLabel = autoValue !== null ? (AUTO_TYPES[autoValue] || `Auto ${autoValue}`) : "Não informado";
+        const devMode = autoValue === 5 ? "monitoring" : "automation";
 
         // Define o tipo de sensor baseado no MOD
         let sensorType = "irrigation"; // padrão
@@ -224,16 +296,19 @@ async function registerSensorDevice(
             connector: "669188217d61980008c18be1",
             network: "6686e259ffa21c0008faa296",
             chunk_period: "day",
-            chunk_retention: 31,
+            chunk_retention: retentionDays,
             tags: [
                 { key: "dev_eui", value: serialNumber },
                 { key: "central_sn", value: centralSN },
                 { key: "sensor_number", value: sensorNumber },
                 ...(groupId ? [{ key: "group_id", value: groupId }] : []),
                 ...(organizationId ? [{ key: "organization_id", value: organizationId }] : []),
+                { key: "plan_retention_days", value: String(retentionDays) },
+                ...(autoValue !== null ? [{ key: "auto", value: String(autoValue) }] : []),
+                { key: "auto_label", value: autoLabel },
                 { key: "sensor", value: sensorType },
                 { key: "device_type", value: "device" },
-                { key: "dev_mode", value: "automation" },
+                { key: "dev_mode", value: devMode },
             ],
 
         };

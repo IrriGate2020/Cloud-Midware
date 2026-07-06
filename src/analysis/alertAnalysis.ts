@@ -26,7 +26,16 @@ const variableLabels: { [key: string]: string } = {
     'PHO': 'Fósforo',
     'POT': 'Potássio',
     'LUX': 'Luminosidade',
-    'PH': 'percentual de Hidrogênio'
+    'PH': 'percentual de Hidrogênio',
+    'ES000': 'Sensor OK',
+    'ES001': 'Erro de CRC',
+    'ES002': 'Leitura fora dos limites',
+    'ES003': 'Sensor sem resposta',
+    'ES004': 'Mudanca brusca na leitura',
+    'ES005': 'Leitura acima do setpoint high',
+    'ES006': 'Leitura abaixo do setpoint low',
+    'EA000': 'Automacao OK',
+    'EA001': 'Sem estimulo',
 };
 
 // Função para obter o label da variável
@@ -103,6 +112,7 @@ async function alertAnalysis(context: any, scope: any[]) {
         try {
             let current_value: any = null;
             let value_found = false;
+            let current_metadata: any = {};
 
             // Primeiro, tentar buscar a variável diretamente
             const target_data = await resources.devices.getDeviceData(device_id, {
@@ -112,6 +122,7 @@ async function alertAnalysis(context: any, scope: any[]) {
 
             if (target_data.length > 0) {
                 current_value = target_data[0].value;
+                current_metadata = target_data[0].metadata || {};
                 value_found = true;
             } else {
                 // Se não encontrou como variável standalone, buscar na variável "data" metadata
@@ -126,6 +137,7 @@ async function alertAnalysis(context: any, scope: any[]) {
                     const metadata = data_variable[0].metadata;
                     if (alert_variable in metadata) {
                         current_value = metadata[alert_variable];
+                        current_metadata = {};
                         value_found = true;
                         context.log(`Found ${alert_variable} in 'data' metadata: ${current_value}`);
                     }
@@ -180,10 +192,11 @@ async function alertAnalysis(context: any, scope: any[]) {
                             // Buscar nome do dispositivo
                             const device_name = device_info.name || device_id;
                             const variable_label = getVariableLabel(alert_variable);
+                            const error_detail = current_metadata.description ? ` Detalhe: ${current_metadata.description}` : '';
                             
                             await resources.run.notificationCreate(alert_metadata.send_to, {
                                 title: `Alerta: ${variable_label}`,
-                                message: `A condição do alerta foi atingida para o(a) ${device_name}: ${variable_label} ${condition} ${threshold_value}. Valor atual: ${current_value}`
+                                message: `A condição do alerta foi atingida para o(a) ${device_name}: ${variable_label} ${condition} ${threshold_value}. Valor atual: ${current_value}.${error_detail}`
                             });
                             context.log(`Push notification sent to user ${alert_metadata.send_to}`);
                         } catch (error) {
@@ -211,6 +224,9 @@ async function alertAnalysis(context: any, scope: any[]) {
                             condition: condition,
                             threshold: threshold_value,
                             current_value: current_value,
+                            error_label: current_metadata.label,
+                            error_description: current_metadata.description,
+                            error_severity: current_metadata.severity,
                             timestamp: new Date().toISOString()
                         }
                     });

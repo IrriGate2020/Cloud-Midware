@@ -1,4 +1,5 @@
 import { Analysis, Resources } from "@tago-io/sdk";
+import { PlanDefinition, enforcePlanLimit, getOrganizationDeviceIdFromTags, getPlanFromTags, publishPlanStatus, resolveOrganizationDeviceId } from "./planLimits";
 
 interface AlertData {
     alert_variable?: string;
@@ -8,6 +9,7 @@ interface AlertData {
     aler_email?: boolean;
     alert_send_to?: string;
     checkin_time?: number;  // Tempo em horas para alerta de checkin
+    alert_session_id?: string;
 }
 
 // Mapeamento de variáveis para labels
@@ -24,7 +26,16 @@ const variableLabels: { [key: string]: string } = {
     'PHO': 'Fósforo',
     'POT': 'Potássio',
     'LUX': 'Luminosidade',
-    'PH': 'percentual de Hidrogênio'
+    'PH': 'percentual de Hidrogênio',
+    'ES000': 'Sensor OK',
+    'ES001': 'Erro de CRC',
+    'ES002': 'Leitura fora dos limites',
+    'ES003': 'Sensor sem resposta',
+    'ES004': 'Mudanca brusca na leitura',
+    'ES005': 'Leitura acima do setpoint high',
+    'ES006': 'Leitura abaixo do setpoint low',
+    'EA000': 'Automacao OK',
+    'EA001': 'Sem estimulo',
 };
 
 // Função para obter o label da variável
@@ -78,6 +89,11 @@ async function createAlert(context: any, scope: any[]) {
                 case 'checkin_time':
                     alertData.checkin_time = Number(item.value);
                     break;
+                case 'session_id':
+                case 'alert_session_id':
+                case 'input_session_id':
+                    alertData.alert_session_id = String(item.value);
+                    break;
             }
         }
     }
@@ -100,14 +116,18 @@ async function createAlert(context: any, scope: any[]) {
         }
     }
 
-    // Verificar se o usuário é admin (sem limite de alertas)
+    // Verificar se o usuário é admin para manter a descrição legível; o limite agora vem do plano da organização.
     let is_admin = false;
     let user_name = "";
+    let user_plan: PlanDefinition | null = null;
+    let user_organization_device_id: string | undefined;
     
     if (alertData.alert_send_to) {
         try {
             const user_info = await resources.run.userInfo(alertData.alert_send_to);
             const user_tags = user_info.tags || [];
+            user_plan = getPlanFromTags(user_tags);
+            user_organization_device_id = getOrganizationDeviceIdFromTags(user_tags);
             
             // Verificar se tem tag access: admin
             is_admin = user_tags.some((tag: any) => tag.key === 'access' && tag.value === 'admin');
@@ -116,68 +136,11 @@ async function createAlert(context: any, scope: any[]) {
             user_name = user_info.name || alertData.alert_send_to;
             
             if (is_admin) {
-                context.log("User is admin - no alert limit applied");
+                context.log("User is admin - organization plan limit still applies");
             }
         } catch (error) {
             context.log("Error checking user info:", error);
             user_name = alertData.alert_send_to;
-        }
-    }
-
-    // Verificar limite de alertas apenas para não-admins (máximo 10 alertas por usuário)
-    if (!is_admin) {
-        // Buscar o group_id do dispositivo a ser monitorado
-        let group_device_id_for_limit = null;
-        
-        try {
-            const device_info_temp = await resources.devices.info(alertData.alert_device);
-            const group_id_tag_temp = device_info_temp.tags?.find((tag: any) => tag.key === "group_id");
-            
-            if (group_id_tag_temp && group_id_tag_temp.value) {
-                group_device_id_for_limit = group_id_tag_temp.value;
-            } else {
-                context.log("No group_id tag found for alert device - cannot verify alert limit");
-                return context.log("Cannot create alert: unable to verify alert limit");
-            }
-        } catch (error) {
-            context.log("Error fetching group_id for limit check:", error);
-            return context.log("Cannot create alert: unable to verify alert limit");
-        }
-
-        // Verificar alertas existentes do usuário
-        try {
-            const existing_alerts = await resources.devices.getDeviceData(group_device_id_for_limit, {
-                variables: ["alertas"],
-                qty: 9999
-            });
-
-            // Filtrar apenas alertas deste usuário específico (independente do dispositivo)
-            const user_alerts = existing_alerts.filter((alert: any) => 
-                alert.metadata && alert.metadata.send_to === alertData.alert_send_to
-            );
-
-            if (user_alerts.length >= 10) {
-                context.log(`Alert limit reached: ${user_alerts.length}/10 alerts already exist for user ${alertData.alert_send_to}`);
-                
-                // Enviar notificação ao usuário sobre o limite
-                if (alertData.alert_send_to) {
-                    try {
-                        await resources.run.notificationCreate(alertData.alert_send_to, {
-                            title: "Limite de Alertas Atingido",
-                            message: "Você já possui o número máximo de 10 alertas configurados. Delete um alerta existente para criar um novo."
-                        });
-                    } catch (error) {
-                        context.log("Error sending limit notification:", error);
-                    }
-                }
-                
-                return context.log("Cannot create alert: maximum limit of 10 alerts reached for this user");
-            }
-
-            context.log(`Current alerts for user ${alertData.alert_send_to}: ${user_alerts.length}/10`);
-        } catch (error) {
-            context.log("Error checking alert limit:", error);
-            return context.log("Cannot create alert: unable to verify alert limit");
         }
     }
 
@@ -213,6 +176,45 @@ async function createAlert(context: any, scope: any[]) {
 
     const group_device_id = group_id_tag.value;
     context.log(`Saving alert in group device: ${group_device_id} for sensor: ${alertData.alert_device}`);
+    const organization_device_id = await resolveOrganizationDeviceId(resources, {
+        explicitCandidates: [
+            user_organization_device_id,
+            getOrganizationDeviceIdFromTags(device_info.tags || []),
+            device_id !== group_device_id ? device_id : undefined
+        ],
+        groupDeviceId: group_device_id,
+        fallbackDeviceId: group_device_id
+    });
+    context.log(`Plan usage target organization device: ${organization_device_id}`);
+
+    const planLimit = await enforcePlanLimit(resources, organization_device_id, "alerts", user_plan);
+    context.log(`Plan limit check for alerts: plan=${planLimit.plan?.id || "not_found"} used=${planLimit.status?.usage.alerts ?? "n/a"} limit=${planLimit.plan?.alertLimit ?? "n/a"}`);
+    if (!planLimit.allowed) {
+        context.log(planLimit.message);
+
+        await resources.devices.sendDeviceData(device_id, {
+            variable: "validation",
+            value: planLimit.message || "Limite de alertas atingido para o plano da organização.",
+            metadata: {
+                type: "danger",
+                show_markdown: true,
+                ...(alertData.alert_session_id ? { session_id: alertData.alert_session_id } : {})
+            }
+        });
+
+        if (alertData.alert_send_to) {
+            try {
+                await resources.run.notificationCreate(alertData.alert_send_to, {
+                    title: "Limite de Alertas Atingido",
+                    message: planLimit.message || "O limite de alertas do plano da organização foi atingido."
+                });
+            } catch (error) {
+                context.log("Error sending limit notification:", error);
+            }
+        }
+
+        return context.log("Cannot create alert: organization plan limit reached");
+    }
 
     // Preparar metadata baseado no tipo de alerta
     const alert_metadata: any = {
@@ -243,6 +245,39 @@ async function createAlert(context: any, scope: any[]) {
         value: 'enabled',
         metadata: alert_metadata
     });
+
+    if (planLimit.plan) {
+        if (organization_device_id !== group_device_id) {
+            await resources.devices.sendDeviceData(organization_device_id, {
+                variable: "alertas",
+                value: "enabled",
+                metadata: {
+                    ...alert_metadata,
+                    organization_usage_record: true,
+                    source_group_device: group_device_id
+                }
+            });
+        }
+
+        const updatedUsage = {
+            alerts: (planLimit.status?.usage.alerts || 0) + 1,
+            reports: planLimit.status?.usage.reports || 0
+        };
+        const updatedStatus = await publishPlanStatus(resources, organization_device_id, planLimit.plan, updatedUsage);
+
+        await resources.devices.sendDeviceData(organization_device_id, {
+            variable: "plano_alertas_usados",
+            value: updatedUsage.alerts,
+            metadata: {
+                remaining: updatedStatus.remaining.alerts,
+                limit: planLimit.plan.alertLimit,
+                plan_id: planLimit.plan.id,
+                updated_at: new Date().toISOString()
+            }
+        });
+
+        context.log(`Plan usage updated for organization ${organization_device_id}: alerts_used=${updatedUsage.alerts} alerts_remaining=${updatedStatus.remaining.alerts}`);
+    }
 
     context.log(`Alert created successfully with group: ${group_id}`);
     

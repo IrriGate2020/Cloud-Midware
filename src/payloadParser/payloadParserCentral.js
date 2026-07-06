@@ -34,6 +34,56 @@ function toTagoFormat(value) {
     "EPS",
     "POT",
   ];
+  const errorDefinitions = {
+    ES000: ["Sensor OK", "ok", "OK. Nenhum problema com o sensor."],
+    ES001: ["Erro de CRC", "warning", "O CRC recebido pelo sensor veio errado. Pode indicar ruido eletromagnetico presente no local ou degradacao no cabo de comunicacao. Nao e critico."],
+    ES002: ["Leitura fora dos limites", "critical", "Leitura fora dos limites esperados. Normalmente indica sensor chegando ao fim da vida util; em alguns casos pode ser remediado com calibracao."],
+    ES003: ["Sensor sem resposta", "critical", "Nenhuma resposta recebida. O sensor pode estar queimado ou conectado incorretamente, exigindo revisao das conexoes."],
+    ES004: ["Mudanca brusca na leitura", "diagnostic", "Mudanca brusca acima de 15% na leitura do sensor. Pode indicar remocao do sensor do local ou acionamento de automacao."],
+    ES005: ["Leitura acima do setpoint high", "warning", "Leitura do sensor muito acima do setpoint high da automacao associada. Pode indicar falha em automacoes como sombreamento e climatizacao."],
+    ES006: ["Leitura abaixo do setpoint low", "warning", "Leitura do sensor muito abaixo do setpoint low da automacao associada. Pode indicar falha em automacoes como aquecimento e irrigacao."],
+    EA000: ["Automacao OK", "ok", "OK. Nenhum problema com a automacao."],
+    EA001: ["Sem estimulo", "warning", "A variavel de controle nao sofreu variacao significativa ao ativar a automacao."],
+  };
+
+  const addErrorFields = () => {
+    if (!jsonObj.hasOwnProperty("ERRO")) return;
+
+    const rawErrors = typeof jsonObj.ERRO === "string" ? JSON.parse(jsonObj.ERRO) : jsonObj.ERRO;
+    if (!rawErrors || typeof rawErrors !== "object" || Array.isArray(rawErrors)) return;
+
+    const activeErrors = [];
+    data[0].metadata.ERRO = rawErrors;
+
+    Object.entries(errorDefinitions).forEach(([code, definition]) => {
+      const value = Number(rawErrors[code] || 0);
+      const [label, severity, description] = definition;
+
+      data[0].metadata[code] = value;
+
+      if (value > 0) {
+        activeErrors.push({ code, value, label, severity, description });
+      }
+
+      data.push({
+        variable: code,
+        value,
+        metadata: {
+          code,
+          label,
+          description,
+          type: code.startsWith("EA") ? "automation" : "sensor",
+          severity,
+          active: value > 0,
+        },
+      });
+    });
+
+    data[0].metadata.erro_ativo = activeErrors.length > 0;
+    data[0].metadata.erro_quantidade = activeErrors.length;
+    data[0].metadata.erro_codigos = activeErrors.map((error) => error.code).join(", ");
+    data[0].metadata.erro_descricao = activeErrors.map((error) => error.code + ": " + error.label).join(" | ");
+  };
 
   fields.forEach((field) => {
     if (jsonObj.hasOwnProperty(field)) {
@@ -109,6 +159,7 @@ function toTagoFormat(value) {
       })
     }
   }
+  addErrorFields();
   return data;
 }
 

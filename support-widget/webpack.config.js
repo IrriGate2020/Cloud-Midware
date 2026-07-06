@@ -13,6 +13,12 @@ module.exports = {
     extensions: [".ts", ".js"],
     modules: [path.resolve(__dirname, "src"), "node_modules"]
   },
+  resolveLoader: {
+    modules: [
+      "node_modules",
+      path.resolve(__dirname, "../timer-widget/node_modules")
+    ]
+  },
   module: {
     rules: [
       {

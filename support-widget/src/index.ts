@@ -45,13 +45,18 @@ type AsanaTask = {
   name?: string;
 };
 
+const ASANA_REQUEST_TIMEOUT_MS = 20000;
+const SUPPORT_RETRY_COOLDOWN_MS = 60000;
+let supportSubmitInFlight = false;
+let nextSupportSubmitAt = 0;
+
 const HARDCODED_CONFIG: SupportConfig = {
   mode: "support-center",
   asanaToken: "",
   asanaWorkspaceId: "1206375074805160",
   asanaProjectId: "1214221794567142",
   asanaAssignee: "kaua.cristovao@irrigate.com.br",
-  whatsappNumber: "",
+  whatsappNumber: "5541997820115",
   companyName: "IrriGate2020"
 };
 
@@ -422,9 +427,21 @@ function readQueryConfig(): Partial<SupportConfig> {
   return config;
 }
 
+function readPathConfig(): Partial<SupportConfig> {
+  const path = window.location.pathname.toLowerCase();
+  if (path.includes("support-asana-whatsapp")) {
+    return { mode: "asana-whatsapp" };
+  }
+  if (path.includes("support-center")) {
+    return { mode: "support-center" };
+  }
+  return {};
+}
+
 function resolveConfig(widget?: TagoWidget): SupportConfig {
   const merged = {
     ...HARDCODED_CONFIG,
+    ...readPathConfig(),
     ...readWidgetConfig(widget),
     ...readQueryConfig()
   };
@@ -465,6 +482,20 @@ function formatNotes(ticket: SupportTicket, widget?: TagoWidget): string {
   return lines.join("\n");
 }
 
+function getAsanaDueDateToday(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  return year && month && day ? `${year}-${month}-${day}` : new Date().toISOString().slice(0, 10);
+}
+
 async function createAsanaTask(config: SupportConfig, ticket: SupportTicket, widget?: TagoWidget): Promise<AsanaTask> {
   if (!config.asanaToken || !config.asanaWorkspaceId || !config.asanaProjectId) {
     throw new Error("Configure asanaToken, asanaWorkspaceId e asanaProjectId antes de enviar.");
@@ -474,22 +505,37 @@ async function createAsanaTask(config: SupportConfig, ticket: SupportTicket, wid
     name: `[${ticket.priority}] ${ticket.subject}`,
     notes: formatNotes(ticket, widget),
     workspace: config.asanaWorkspaceId,
-    projects: [config.asanaProjectId]
+    projects: [config.asanaProjectId],
+    due_on: getAsanaDueDateToday()
   };
 
   if (config.asanaAssignee) {
     taskData.assignee = config.asanaAssignee;
   }
 
-  const response = await fetch("https://app.asana.com/api/1.0/tasks", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.asanaToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify({ data: taskData })
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), ASANA_REQUEST_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch("https://app.asana.com/api/1.0/tasks", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.asanaToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({ data: taskData }),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Tempo limite ao conectar com o Asana. O chamado nao foi criado.");
+    }
+    throw new Error("Falha de comunicacao com o Asana. O chamado nao foi criado.");
+  } finally {
+    window.clearTimeout(timeout);
+  }
 
   const json = await response.json().catch(() => null);
 
@@ -503,6 +549,20 @@ async function createAsanaTask(config: SupportConfig, ticket: SupportTicket, wid
   }
 
   return json.data as AsanaTask;
+}
+
+function formatSupportError(error: unknown): string {
+  const detail = error instanceof Error ? error.message : "Falha inesperada ao enviar chamado.";
+
+  if (
+    detail.includes("Falha de comunicacao com o Asana") ||
+    detail.includes("Tempo limite ao conectar com o Asana") ||
+    detail.includes("Failed to fetch")
+  ) {
+    return "Nao foi possivel conectar ao Asana agora. O chamado nao foi criado. Aguarde 1 minuto e tente novamente.";
+  }
+
+  return `Nao foi possivel criar o chamado no Asana. Tente novamente em alguns instantes. Detalhe: ${detail}`;
 }
 
 function readTicket(form: HTMLFormElement): SupportTicket {
@@ -532,9 +592,16 @@ function validateTicket(ticket: SupportTicket): string | null {
 function createWhatsappUrl(config: SupportConfig, ticket?: Partial<SupportTicket>): string {
   const number = config.whatsappNumber.replace(/\D/g, "");
   const message = [
-    `Olá, ${config.companyName}. Preciso de suporte.`,
+    "Olá, Time IrriGate. Gostaria que me ajudasse com o seguinte item",
+    "",
+    ticket?.name ? `Nome: ${ticket.name}` : "",
+    ticket?.email ? `Email: ${ticket.email}` : "",
+    ticket?.phone ? `Telefone: ${ticket.phone}` : "",
+    ticket?.company ? `Empresa/Unidade: ${ticket.company}` : "",
     ticket?.subject ? `Assunto: ${ticket.subject}` : "",
-    ticket?.priority ? `Prioridade: ${ticket.priority}` : ""
+    ticket?.category ? `Categoria: ${ticket.category}` : "",
+    ticket?.priority ? `Prioridade: ${ticket.priority}` : "",
+    ticket?.description ? `Descrição: ${ticket.description}` : ""
   ].filter(Boolean).join("\n");
 
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
@@ -560,8 +627,9 @@ function renderSupportInfo(config: SupportConfig): string {
     <aside class="support-side">
       <h2>Fluxo do atendimento</h2>
       <ul class="support-list">
-        <li>O formulario cria automaticamente uma tarefa no projeto configurado no Asana.</li>
-        <li>A descricao inclui contato, prioridade e categoria para acelerar a triagem.</li>
+        <li>O formulario cria automaticamente uma tarefa para o time de suporte da IrriGate.</li>
+        <li>A descricao inclui contato, prioridade e categoria para acelerar o atendimento.</li>
+        <li>Atendimentos criticos seguem o prazo do plano: Avancado ate 6 horas uteis; Premium ate 3 horas uteis ou ate 6 horas em dias nao uteis.</li>
         <li>Use prioridade critica apenas quando houver impacto operacional imediato.</li>
       </ul>
       ${config.mode === "asana-whatsapp" ? renderWhatsappBlock(config) : ""}
@@ -574,7 +642,7 @@ function renderWhatsappBlock(config: SupportConfig): string {
   return `
     <div class="whatsapp-block">
       <h2>Contato rápido</h2>
-      <p class="mini-text">Abre uma conversa no WhatsApp da empresa com uma mensagem inicial preenchida.</p>
+      <p class="mini-text">Para duvidas e sugestoes, use sempre a abertura de chamado. Priorize o atendimento por WhatsApp para situacoes mais criticas que precisam de respostas mais imediatas. Atendimentos criticos do plano Premium podem levar ate 3 horas uteis ou ate 6 horas em dias nao uteis.</p>
       <button class="button secondary" type="button" data-whatsapp ${disabled}>Falar no WhatsApp</button>
     </div>
   `;
@@ -586,8 +654,8 @@ function renderForm(config: SupportConfig, widget?: TagoWidget): string {
   return `
     <main class="support-panel">
       <header class="support-header">
-        <h1>${isCompact ? "Suporte Asana + WhatsApp" : "Central de Suporte"}</h1>
-        <p>${config.companyName} - abertura de chamados integrada ao Asana.</p>
+        <h1>${isCompact ? "Central de Suporte + WhatsApp" : "Central de Suporte"}</h1>
+        <p>Abertura de chamados diretamente com o time de suporte</p>
       </header>
       <form class="support-form ${isCompact ? "compact" : ""}" data-support-form>
         <div class="field">
@@ -661,6 +729,19 @@ function bindSupportForm(container: HTMLElement, config: SupportConfig, widget?:
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+
+    if (supportSubmitInFlight) {
+      showStatus(container, "info", "Ja existe uma tentativa de abertura de chamado em andamento. Aguarde a conclusao.");
+      return;
+    }
+
+    const now = Date.now();
+    if (now < nextSupportSubmitAt) {
+      const seconds = Math.ceil((nextSupportSubmitAt - now) / 1000);
+      showStatus(container, "info", `Aguarde ${seconds}s antes de tentar criar o chamado novamente.`);
+      return;
+    }
+
     const ticket = readTicket(form);
     const validationError = validateTicket(ticket);
 
@@ -669,22 +750,31 @@ function bindSupportForm(container: HTMLElement, config: SupportConfig, widget?:
       return;
     }
 
+    supportSubmitInFlight = true;
     setLoading(form, true);
-    showStatus(container, "info", "Enviando chamado para o Asana...");
+    showStatus(container, "info", "Enviando chamado...");
 
     try {
-      const task = await createAsanaTask(config, ticket, widget);
-      const taskUrl = task.permalink_url || `https://app.asana.com/0/${config.asanaProjectId}/${task.gid}`;
+      await createAsanaTask(config, ticket, widget);
+      nextSupportSubmitAt = 0;
       showStatus(
         container,
         "success",
-        `Chamado aberto no Asana. <a href="${escapeHtml(taskUrl)}" target="_blank" rel="noreferrer">Ver tarefa</a>.`
+        "O seu chamado ja foi criado e o time de suporte entrara em contato conforme o prazo do seu plano. Atendimentos criticos: Avancado ate 6h uteis; Premium ate 3h uteis ou ate 6h em dias nao uteis."
       );
       form.reset();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha inesperada ao enviar chamado.";
-      showStatus(container, "error", escapeHtml(message));
+      const detail = error instanceof Error ? error.message : "";
+      if (
+        detail.includes("Falha de comunicacao com o Asana") ||
+        detail.includes("Tempo limite ao conectar com o Asana") ||
+        detail.includes("Failed to fetch")
+      ) {
+        nextSupportSubmitAt = Date.now() + SUPPORT_RETRY_COOLDOWN_MS;
+      }
+      showStatus(container, "error", escapeHtml(formatSupportError(error)));
     } finally {
+      supportSubmitInFlight = false;
       setLoading(form, false);
     }
   });
