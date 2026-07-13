@@ -1,4 +1,5 @@
 import { Analysis, Resources } from "@tago-io/sdk";
+import { sendRunNotification } from "./notificationUtils";
 
 interface AlertMetadata {
     alert_variable: string;
@@ -33,6 +34,38 @@ const variableLabels: { [key: string]: string } = {
 // Função para obter o label da variável
 function getVariableLabel(variable: string): string {
     return variableLabels[variable] || variable;
+}
+
+function getComparableValue(value: any): number | null {
+    const parsed = Number(String(value).replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function evaluateCondition(currentValue: any, condition: string, thresholdValue: any): boolean {
+    if (condition === "==" || condition === "!=") {
+        const currentComparable = getComparableValue(currentValue);
+        const thresholdComparable = getComparableValue(thresholdValue);
+        const isEqual = currentComparable !== null && thresholdComparable !== null ? currentComparable === thresholdComparable : String(currentValue) === String(thresholdValue);
+        return condition === "==" ? isEqual : !isEqual;
+    }
+    const currentNum = getComparableValue(currentValue);
+    const thresholdNum = getComparableValue(thresholdValue);
+    if (currentNum === null || thresholdNum === null) return false;
+    if (condition === ">=") return currentNum >= thresholdNum;
+    if (condition === ">") return currentNum > thresholdNum;
+    if (condition === "<=") return currentNum <= thresholdNum;
+    if (condition === "<") return currentNum < thresholdNum;
+    return false;
+}
+
+function getLegacyErrorAlertValue(metadata: any): { value: number; metadata: any } | null {
+    if (!metadata) return null;
+    if (metadata.erro_ativo !== undefined) return { value: metadata.erro_ativo ? 1 : 0, metadata: { label: metadata.erro_codigos || "Erro de leitura", description: metadata.erro_descricao || "Erro de leitura ativo", severity: metadata.erro_ativo ? "critical" : "ok" } };
+    if (metadata.ERRO && typeof metadata.ERRO === "object") {
+        const activeCodes = Object.entries(metadata.ERRO).filter(([, value]) => Number(value) > 0).map(([code]) => code);
+        return { value: activeCodes.length > 0 ? 1 : 0, metadata: { label: activeCodes.join(", ") || "Sem erro", description: activeCodes.length ? "Codigos ativos: " + activeCodes.join(", ") : "Sem erro de leitura ativo", severity: activeCodes.length ? "critical" : "ok" } };
+    }
+    return null;
 }
 
 async function alertAnalysisCentral(context: any, scope: any[]) {
@@ -110,6 +143,14 @@ async function alertAnalysisCentral(context: any, scope: any[]) {
                 current_value = target_data[0].value;
                 current_metadata = target_data[0].metadata || {};
                 value_found = true;
+            } else if (alert_variable === "ERRO") {
+                const dataVariable = await resources.devices.getDeviceData(device_id, { variables: ["data"], qty: 1 });
+                const errorAlert = getLegacyErrorAlertValue(dataVariable[0]?.metadata);
+                if (errorAlert) {
+                    current_value = errorAlert.value;
+                    current_metadata = errorAlert.metadata;
+                    value_found = true;
+                }
             }
 
             if (!value_found) {
@@ -121,27 +162,7 @@ async function alertAnalysisCentral(context: any, scope: any[]) {
             const threshold_value = alert_metadata.threshold_value;
 
             context.log(`Checking alert: ${alert_variable} ${condition} ${threshold_value}, current: ${current_value}`);
-
-            let should_trigger = false;
-
-            // Verificar condição
-            if (condition === "==") {
-                // Para comparação de igualdade, converter para string para comparar
-                should_trigger = String(current_value) === String(threshold_value);
-            } else if (condition === "!=") {
-                should_trigger = String(current_value) !== String(threshold_value);
-            } else {
-                // Para comparações numéricas
-                const current_num = parseFloat(String(current_value));
-                const threshold_num = parseFloat(String(threshold_value));
-
-                if (!isNaN(current_num) && !isNaN(threshold_num)) {
-                    if (condition === ">=") should_trigger = current_num >= threshold_num;
-                    else if (condition === ">") should_trigger = current_num > threshold_num;
-                    else if (condition === "<=") should_trigger = current_num <= threshold_num;
-                    else if (condition === "<") should_trigger = current_num < threshold_num;
-                }
-            }
+            const should_trigger = evaluateCondition(current_value, condition, threshold_value);
 
             // Disparar notificação se necessário
             if (should_trigger) {
@@ -163,11 +184,7 @@ async function alertAnalysisCentral(context: any, scope: any[]) {
                             const variable_label = getVariableLabel(alert_variable);
                             const error_detail = current_metadata.description ? ` Detalhe: ${current_metadata.description}` : '';
                             
-                            await resources.run.notificationCreate(alert_metadata.send_to, {
-                                title: `Alerta: ${variable_label}`,
-                                message: `A condição do alerta foi atingida para o(a) ${device_name}: ${variable_label} ${condition} ${threshold_value}. Valor atual: ${current_value}.${error_detail}`
-                            });
-                            context.log(`Push notification sent to user ${alert_metadata.send_to}`);
+                            await sendRunNotification(resources, alert_metadata.send_to, `Alerta: ${variable_label}`, `A condição do alerta foi atingida para o(a) ${device_name}: ${variable_label} ${condition} ${threshold_value}. Valor atual: ${current_value}.${error_detail}`, context);
                         } catch (error) {
                             context.log(`Error sending notification: ${error}`);
                         }

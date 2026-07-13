@@ -177,6 +177,32 @@
         line-height: 1.45;
       }
 
+      .plan-price {
+        display: flex;
+        align-items: baseline;
+        gap: 5px;
+        margin-top: 14px;
+        color: #123a5f;
+      }
+
+      .price-currency {
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      .price-value {
+        font-size: 29px;
+        line-height: 1;
+        font-weight: 950;
+        letter-spacing: 0;
+      }
+
+      .price-period {
+        color: #6a7788;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
       .plan-body {
         padding: 16px 18px 18px;
       }
@@ -393,12 +419,13 @@
           alerts: "0",
           reports: "0",
           retention: "7",
+          price: "49,90",
           icon: "eye",
           features: [
             ["Até 5 sensores cadastrados", true],
             ["Alertas automáticos não inclusos", false],
             ["Relatórios automáticos não inclusos", false],
-            ["Retenção de dados por 7 dias", true],
+            ["7 dias de dados", true],
             ["Abertura de chamados diretamente com o time de suporte não inclusa", false],
             ["Atendimento por WhatsApp não incluso", false],
             ["Tempo de resposta dedicado não incluso", false]
@@ -413,12 +440,13 @@
           alerts: "10",
           reports: "1",
           retention: "30",
+          price: "99,90",
           icon: "bell",
           features: [
             ["Até 10 sensores cadastrados", true],
             ["10 alertas configuráveis", true],
             ["1 relatório disponível", true],
-            ["Retenção de dados por 30 dias", true],
+            ["30 dias de dados", true],
             ["Abertura de chamados diretamente com o time de suporte", true],
             ["Atendimento por WhatsApp não incluso", false],
             ["Atendimentos críticos: até 6 horas úteis", true]
@@ -433,13 +461,14 @@
           alerts: "30",
           reports: "5",
           retention: "90",
+          price: "249,90",
           icon: "diamond",
           featured: true,
           features: [
             ["Até 30 sensores cadastrados", true],
             ["30 alertas configuráveis", true],
             ["5 relatórios disponíveis", true],
-            ["Retenção de dados por 90 dias", true],
+            ["90 dias de dados", true],
             ["Abertura de chamados diretamente com o time de suporte", true],
             ["Abertura de chamados integrado com o Whatsapp", true],
             ["Atendimentos críticos: até 3 horas úteis ou até 6 horas em dias não úteis", true]
@@ -469,6 +498,11 @@
                 <span class="plan-label">${plan.label}</span>
               </div>
               <h2 class="plan-name">${plan.name}</h2>
+              <div class="plan-price" aria-label="Preço do plano ${plan.name}">
+                <span class="price-currency">R$</span>
+                <span class="price-value">${plan.price}</span>
+                <span class="price-period">/ mês</span>
+              </div>
               <p class="plan-description">${plan.description}</p>
             </div>
             <div class="plan-body">
@@ -487,7 +521,7 @@
                 </div>
                 <div class="metric">
                   <span class="metric-value">${plan.retention}</span>
-                  <span class="metric-label">dias de retenção</span>
+                  <span class="metric-label">dias de dados</span>
                 </div>
               </div>
               <ul class="feature-list">${features}</ul>
@@ -506,7 +540,7 @@
                   <h1 class="plans-title">Planos IrriGate</h1>
                   <p class="plans-subtitle">
                     Escolha o plano ideal para o tamanho da operação. Cada opção define quantos sensores,
-                    alertas, relatórios, retenção de dados e canais de suporte ficam disponíveis para a organização.
+                    alertas, relatórios, histórico de dados e canais de suporte ficam disponíveis para a organização.
                     Entre em contato para planos personalizados.
                   </p>
                 </div>
@@ -541,7 +575,7 @@
                   <ul class="status-list">
                     <li><span class="status-dot"></span><span>Alertas e relatórios são descontados quando criados no sistema.</span></li>
                     <li><span class="status-dot green"></span><span>O status da organização mostra usados, restantes e limite contratado.</span></li>
-                    <li><span class="status-dot gold"></span><span>A retenção aplicada nos devices segue o plano: 7 dias no Essencial, 30 dias no Avançado e 90 dias no Premium.</span></li>
+                    <li><span class="status-dot gold"></span><span>O histórico disponível segue o plano: 7 dias de dados no Essencial, 30 dias de dados no Avançado e 90 dias de dados no Premium.</span></li>
                     <li><span class="status-dot"></span><span>O limite de sensores depende do fluxo de cadastro de sensores da organização.</span></li>
                   </ul>
                 </aside>

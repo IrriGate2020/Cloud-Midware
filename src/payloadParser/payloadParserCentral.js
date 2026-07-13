@@ -1,5 +1,5 @@
 function toTagoFormat(value) {
-  const jsonObj = JSON.parse(value);
+  const jsonObj = typeof value === "string" ? JSON.parse(value) : value;
   const data = [
     {
       variable: "data",
@@ -46,43 +46,124 @@ function toTagoFormat(value) {
     EA001: ["Sem estimulo", "warning", "A variavel de controle nao sofreu variacao significativa ao ativar a automacao."],
   };
 
-  const addErrorFields = () => {
-    if (!jsonObj.hasOwnProperty("ERRO")) return;
+  const parsePossibleJson = (raw) => {
+    if (raw === undefined || raw === null || raw === "") return null;
+    if (typeof raw === "string") {
+      try {
+        return JSON.parse(raw);
+      } catch (_) {
+        return null;
+      }
+    }
+    return raw;
+  };
 
-    const rawErrors = typeof jsonObj.ERRO === "string" ? JSON.parse(jsonObj.ERRO) : jsonObj.ERRO;
-    if (!rawErrors || typeof rawErrors !== "object" || Array.isArray(rawErrors)) return;
+  const addErrorSource = (sources, rawErrors, sourceMetadata = {}) => {
+    const parsedErrors = parsePossibleJson(rawErrors);
+    if (!parsedErrors || typeof parsedErrors !== "object" || Array.isArray(parsedErrors)) return;
+    sources.push({ errors: parsedErrors, metadata: sourceMetadata });
+  };
+
+  const getErrorSources = () => {
+    const sources = [];
+
+    addErrorSource(sources, jsonObj.ERRO, { source: "root" });
+    addErrorSource(sources, jsonObj.data && jsonObj.data.ERRO, { source: "data" });
+
+    const sensFromRoot = jsonObj.sens && typeof jsonObj.sens === "object" ? jsonObj.sens : null;
+    const sensFromData = jsonObj.data && jsonObj.data.sens && typeof jsonObj.data.sens === "object" ? jsonObj.data.sens : null;
+    const sens = sensFromRoot || sensFromData;
+
+    if (sens) {
+      Object.entries(sens).forEach(([sensorNumber, sensorPayload]) => {
+        if (!sensorPayload || typeof sensorPayload !== "object") return;
+        addErrorSource(sources, sensorPayload.ERRO, {
+          source: "sens",
+          sensor_number: sensorNumber,
+          sensor_serial: sensorPayload.SN || sensorPayload.devId || sensorPayload.serial_number,
+          sensor_mod: sensorPayload.MOD,
+        });
+      });
+    }
+
+    return sources;
+  };
+
+  const addErrorFields = () => {
+    const errorSources = getErrorSources();
+    if (!errorSources.length) return;
 
     const activeErrors = [];
-    data[0].metadata.ERRO = rawErrors;
+    const aggregatedErrors = {};
+    const sourceSummary = [];
 
-    Object.entries(errorDefinitions).forEach(([code, definition]) => {
-      const value = Number(rawErrors[code] || 0);
-      const [label, severity, description] = definition;
+    Object.keys(errorDefinitions).forEach((code) => {
+      aggregatedErrors[code] = 0;
+    });
 
-      data[0].metadata[code] = value;
+    errorSources.forEach((source, sourceIndex) => {
+      const activeCodesForSource = [];
 
-      if (value > 0) {
-        activeErrors.push({ code, value, label, severity, description });
-      }
+      Object.entries(errorDefinitions).forEach(([code, definition]) => {
+        const rawValue = source.errors[code];
+        const value = Number(rawValue || 0);
+        const normalizedValue = Number.isFinite(value) ? value : 0;
+        const [label, severity, description] = definition;
 
-      data.push({
-        variable: code,
-        value,
-        metadata: {
-          code,
-          label,
-          description,
-          type: code.startsWith("EA") ? "automation" : "sensor",
-          severity,
-          active: value > 0,
-        },
+        aggregatedErrors[code] = Math.max(aggregatedErrors[code] || 0, normalizedValue);
+
+        if (normalizedValue > 0) {
+          const activeError = {
+            code,
+            value: normalizedValue,
+            label,
+            severity,
+            description,
+            ...source.metadata,
+          };
+          activeErrors.push(activeError);
+          activeCodesForSource.push(code);
+        }
+      });
+
+      sourceSummary.push({
+        index: sourceIndex,
+        ...source.metadata,
+        active_codes: activeCodesForSource,
       });
     });
 
+    data[0].metadata.ERRO = aggregatedErrors;
+    data[0].metadata.erro_fontes = sourceSummary;
     data[0].metadata.erro_ativo = activeErrors.length > 0;
     data[0].metadata.erro_quantidade = activeErrors.length;
-    data[0].metadata.erro_codigos = activeErrors.map((error) => error.code).join(", ");
-    data[0].metadata.erro_descricao = activeErrors.map((error) => error.code + ": " + error.label).join(" | ");
+    data[0].metadata.erro_codigos = Array.from(new Set(activeErrors.map((error) => error.code))).join(", ");
+    const errorDescriptions = activeErrors.map((error) => {
+      const sensorInfo = error.sensor_number !== undefined ? `Sensor ${error.sensor_number} - ` : "";
+      return sensorInfo + error.code + ": " + error.label;
+    });
+    data[0].metadata.erro_descricao = errorDescriptions.join(" | ");
+    data[0].metadata.erro_detalhes = activeErrors;
+
+    Object.keys(errorDefinitions).forEach((code) => {
+      const value = Number(aggregatedErrors[code] || 0);
+      data[0].metadata[code] = value;
+    });
+
+    if (activeErrors.length > 0) {
+      data.push({
+        variable: "ERRO",
+        value: errorDescriptions.join(" | "),
+        metadata: {
+          active: true,
+          quantidade: activeErrors.length,
+          codigos: Array.from(new Set(activeErrors.map((error) => error.code))).join(", "),
+          detalhes: activeErrors,
+          ERRO: aggregatedErrors,
+          fontes: sourceSummary,
+        },
+      });
+    }
   };
 
   fields.forEach((field) => {

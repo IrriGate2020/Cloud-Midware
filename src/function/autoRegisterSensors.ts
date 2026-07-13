@@ -39,6 +39,27 @@ const AUTO_TYPES: Record<number, string> = {
     9: "Iluminação"
 };
 
+const SENSOR_TYPES_BY_MOD: Record<number, string> = {
+    0: "irrigation",
+    1: "nutrition",
+    2: "nutrition_2",
+    4: "illumination",
+    5: "climate",
+    6: "climate"
+};
+
+const SENSOR_LABELS: Record<string, string> = {
+    irrigation: "Irrigação",
+    nutrition: "Nutrição",
+    nutrition_2: "Nutrição 2",
+    illumination: "Iluminação",
+    climate: "Clima"
+};
+
+const SENSOR_LABELS_BY_MOD: Record<number, string> = {
+    6: "Climaprime"
+};
+
 function normalizeTagKey(value: any): string {
     return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
@@ -311,6 +332,17 @@ async function registerSensorDevice(
     networkId?: string
 ): Promise<void> {
     try {
+        const autoValue = parseAutoValue(sensorConfig.Auto ?? sensorConfig.auto);
+        const autoLabel = autoValue !== null ? (AUTO_TYPES[autoValue] || `Auto ${autoValue}`) : "Não informado";
+        const devMode = autoValue === 5 ? "monitoring" : "automation";
+
+        // Define o tipo de sensor baseado no MOD.
+        // MOD 6 representa o sensor Climaprime.
+        const sensorMod = Number(sensorConfig.MOD);
+        const sensorType = SENSOR_TYPES_BY_MOD[sensorMod] || "irrigation";
+        const sensorLabel = SENSOR_LABELS_BY_MOD[sensorMod] || SENSOR_LABELS[sensorType] || "Sensor";
+        const sensorDeviceName = `${sensorLabel} ${sensorNumber} - Central ${centralSN}`;
+
         // Verifica se o sensor já existe
         console.log(`🔍 Verificando se sensor ${serialNumber} já existe...`);
         try {
@@ -326,49 +358,34 @@ async function registerSensorDevice(
             if (listResponse && listResponse.length > 0) {
                 const existingDevice = listResponse[0];
                 await account.devices.edit(existingDevice.id, {
+                    name: sensorDeviceName,
                     chunk_retention: retentionDays,
                     tags: upsertTags(existingDevice.tags || [], [
                         { key: "plan_retention_days", value: String(retentionDays) },
                         { key: "central_sn", value: centralSN },
                         { key: "sensor_number", value: sensorNumber },
                         ...(groupId ? [{ key: "group_id", value: groupId }] : []),
-                        ...(organizationId ? [{ key: "organization_id", value: organizationId }] : [])
+                        ...(organizationId ? [{ key: "organization_id", value: organizationId }] : []),
+                        ...(autoValue !== null ? [{ key: "auto", value: String(autoValue) }] : []),
+                        { key: "auto_label", value: autoLabel },
+                        { key: "sensor", value: sensorType },
+                        { key: "sensor_label", value: sensorLabel },
+                        { key: "sensor_mod", value: String(sensorConfig.MOD ?? "") },
+                        { key: "device_type", value: "device" },
+                        { key: "dev_mode", value: devMode }
                     ])
                 });
-                console.log(`📡 Sensor ${serialNumber} já cadastrado. Retenção atualizada para ${retentionDays} dias.`);
+                console.log(`📡 Sensor ${serialNumber} já cadastrado. Tipo ${sensorLabel} e retenção ${retentionDays} dias atualizados.`);
                 return;
             }
         } catch (listError) {
             console.log(`⚠️ Erro ao verificar existência do sensor, continuando com criação...`);
         }
 
-        const autoValue = parseAutoValue(sensorConfig.Auto ?? sensorConfig.auto);
-        const autoLabel = autoValue !== null ? (AUTO_TYPES[autoValue] || `Auto ${autoValue}`) : "Não informado";
-        const devMode = autoValue === 5 ? "monitoring" : "automation";
-
-        // Define o tipo de sensor baseado no MOD
-        let sensorType = "irrigation"; // padrão
-        switch (sensorConfig.MOD) {
-            case 0:
-                sensorType = "irrigation";
-                break;
-            case 1:
-                sensorType = "nutrition";
-                break;
-            case 2:
-                sensorType = "nutrition_2";
-                break;
-            case 4:
-                sensorType = "illumination";
-                break;
-            case 5:
-                sensorType = "climate";
-                break;
-        }
 
         // Cria o dispositivo do sensor
         const deviceConfig: any = {
-            name: `Sensor ${sensorNumber} - Central ${centralSN}`,
+            name: sensorDeviceName,
             type: "immutable",
             serie_number: serialNumber,
             connector: "669188217d61980008c18be1",
@@ -385,6 +402,8 @@ async function registerSensorDevice(
                 ...(autoValue !== null ? [{ key: "auto", value: String(autoValue) }] : []),
                 { key: "auto_label", value: autoLabel },
                 { key: "sensor", value: sensorType },
+                { key: "sensor_label", value: sensorLabel },
+                { key: "sensor_mod", value: String(sensorConfig.MOD ?? "") },
                 { key: "device_type", value: "device" },
                 { key: "dev_mode", value: devMode },
             ],
@@ -433,24 +452,35 @@ async function registerSensorDevice(
 
             // Configura o dashboard_url baseado no tipo de sensor
             try {
-                const dashboardMap: { [key: string]: string } = {
-                    'irrigation': 'irrigation',
-                    'nutrition': 'nutrition',
-                    'nutrition_2': 'nutrition_2',
-                    'illumination': 'illumination',
-                    'climate': 'climate'
+                const dashboardMap: { [key: string]: string[] } = {
+                    'irrigation': ['irrigation'],
+                    'nutrition': ['nutrition'],
+                    'nutrition_2': ['nutrition_2'],
+                    'illumination': ['illumination'],
+                    'climate': ['climate']
                 };
 
-                const connectorType = dashboardMap[sensorType];
-                if (connectorType) {
-                    // Busca dashboard pelo connector_id (tipo de sensor)
-                    const [dash] = await account.dashboards.list({
-                        amount: 1,
-                        fields: ["id", "tags"],
-                        filter: {
-                            tags: [{ key: "connector_id", value: connectorType }]
+                const connectorTypes = dashboardMap[sensorType] || [];
+                if (connectorTypes.length) {
+                    let dash: any | undefined;
+                    let connectorType = "";
+
+                    for (const candidate of connectorTypes) {
+                        // Busca dashboard pelo connector_id (tipo de sensor)
+                        const [foundDash] = await account.dashboards.list({
+                            amount: 1,
+                            fields: ["id", "tags"],
+                            filter: {
+                                tags: [{ key: "connector_id", value: candidate }]
+                            }
+                        });
+
+                        if (foundDash) {
+                            dash = foundDash;
+                            connectorType = candidate;
+                            break;
                         }
-                    });
+                    }
 
                     if (dash) {
                         const dashboardUrl = `https://admin.tago.io/dashboards/info/${dash.id}?org_dev=${organizationId}&group_dev=${groupId}&sensor=${deviceId}`;

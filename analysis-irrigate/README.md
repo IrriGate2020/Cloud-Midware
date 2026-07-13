@@ -79,3 +79,16 @@ O campo `Auto` representa o tipo de automacao configurada no sensor:
 
 Somente `Auto = 5` deve ser tratado como sensor de monitoramento, gravando `dev_mode=monitoring`.
 Todos os demais valores continuam como `dev_mode=automation`.
+
+## Campo MOD no autocadastro de sensores
+
+O campo `MOD` define o tipo do sensor/dispositivo criado na TagoIO:
+
+- 0: Irrigacao
+- 1: Nutricao
+- 2: Nutricao 2
+- 4: Iluminacao
+- 5: Clima
+- 6: Climaprime (usa sensor=climate)
+
+Para o Climaprime, `MOD = 6` deve criar o device com `sensor=climate`, `sensor_label=Climaprime` e nome iniciando com `Climaprime`. O autocadastro usa o dashboard com `connector_id=climate`.

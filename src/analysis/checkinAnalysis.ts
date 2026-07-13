@@ -1,4 +1,5 @@
 import { Analysis, Resources } from "@tago-io/sdk";
+import { sendRunNotification } from "./notificationUtils";
 
 interface CheckinAlertMetadata {
     alert_variable: string;
@@ -96,7 +97,6 @@ async function checkinAnalysis(context: any, scope: any[]) {
                 try {
                     // Buscar última comunicação do dispositivo
                     const last_data = await resources.devices.getDeviceData(device_id, {
-                        variables: ["data"],  // Pode ajustar para a variável que indica comunicação
                         qty: 1
                     });
 
@@ -138,11 +138,7 @@ async function checkinAnalysis(context: any, scope: any[]) {
                                     const device_info = await resources.devices.info(device_id);
                                     const device_name = device_info.name || device_id;
 
-                                    await resources.run.notificationCreate(alert_metadata.send_to, {
-                                        title: `Alerta: Dispositivo Sem Comunicação`,
-                                        message: `O dispositivo ${device_name} está sem comunicar há ${hours_offline.toFixed(1)} horas (limite: ${checkin_time_hours}h)`
-                                    });
-                                    context.log(`Notification sent to user ${alert_metadata.send_to}`);
+                                    await sendRunNotification(resources, alert_metadata.send_to, `Alerta: Dispositivo Sem Comunicação`, `O dispositivo ${device_name} está sem comunicar há ${hours_offline.toFixed(1)} horas (limite: ${checkin_time_hours}h)`, context);
 
                                     // TODO: Se email_enabled for true, enviar email também
                                 } catch (error) {
@@ -304,11 +300,7 @@ async function checkinAnalysis(context: any, scope: any[]) {
                                     const device_info = await resources.devices.info(device_id);
                                     const device_name = device_info.name || device_id;
 
-                                    await resources.run.notificationCreate(alert_metadata.send_to, {
-                                        title: `Alerta: Central Sem Comunicação`,
-                                        message: `A central ${device_name} está sem comunicar há ${hours_offline.toFixed(1)} horas (limite: ${checkin_time_hours}h)`
-                                    });
-                                    context.log(`Notification sent to user ${alert_metadata.send_to}`);
+                                    await sendRunNotification(resources, alert_metadata.send_to, `Alerta: Central Sem Comunicação`, `A central ${device_name} está sem comunicar há ${hours_offline.toFixed(1)} horas (limite: ${checkin_time_hours}h)`, context);
                                 } catch (error) {
                                     context.log(`Error sending notification: ${error}`);
                                 }
