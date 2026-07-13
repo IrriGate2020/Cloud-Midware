@@ -49,10 +49,10 @@ async function checkinAnalysis(context: any, scope: any[]) {
             filter: {}
         });
 
-        // Filtrar apenas dispositivos que são grupos (connector type)
+        // Filtrar apenas dispositivos que são grupos
         const group_devices = all_devices.filter((device: any) => {
             const type_tag = device.tags?.find((tag: any) => tag.key === "device_type");
-            return type_tag && type_tag.value === "connector";
+            return type_tag && type_tag.value === "group";
         });
 
         context.log(`Found ${group_devices.length} group devices to check`);
@@ -214,7 +214,7 @@ async function checkinAnalysis(context: any, scope: any[]) {
         
         const central_devices = all_devices.filter((device: any) => {
             const type_tag = device.tags?.find((tag: any) => tag.key === "device_type");
-            return type_tag && type_tag.value === "central";
+            return type_tag && type_tag.value === "group";
         });
 
         context.log(`Found ${central_devices.length} central devices to check`);
