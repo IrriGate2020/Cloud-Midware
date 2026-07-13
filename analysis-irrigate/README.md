@@ -6,9 +6,9 @@ Todo device criado para uma organizacao deve respeitar a retencao do plano ativo
 
 - Essencial: 7 dias
 - Avancado: 30 dias
-- Premium: 90 dias
+- Premium: 90 dias (aplicar na TagoIO como `chunk_period=month` e `chunk_retention=3`)
 
-A analysis `manageOrganizationPlan` grava a tag `plan_retention_days` e atualiza o `chunk_retention` nos devices encontrados para a organizacao. Essa tag deve ser usada pela analysis de criacao/autocadastro de devices.
+A analysis `manageOrganizationPlan` grava a tag `plan_retention_days` e atualiza `chunk_period`/`chunk_retention` nos devices encontrados para a organizacao. Essa tag deve ser usada pela analysis de criacao/autocadastro de devices.
 
 No plano Custom, a retencao pode vir do formulario usando uma destas variaveis:
 
@@ -26,21 +26,24 @@ Quando a analysis-irrigate criar um novo device de sensor, ela deve:
 2. Tentar ler `plan_retention_days` nas tags da central.
 3. Se nao encontrar, tentar inferir pela tag `plan`, `plano`, `plan_id`, `plano_id` ou `plan_name`.
 4. Se ainda nao encontrar, tentar buscar o device da organizacao usando `organization_device`, `organization_id`, `org_id`, `company_id` ou `group_id` e repetir a leitura das tags de plano/retencao.
-5. Criar o device com `chunk_period: "day"` e `chunk_retention` igual ao valor resolvido.
+5. Criar o device convertendo a retencao para o formato aceito pela TagoIO: ate 36 dias use `chunk_period: "day"`; acima de 36 dias use `chunk_period: "month"` e `chunk_retention = ceil(dias / 30)`.
 6. Se nenhuma retencao estiver configurada, usar fallback de 30 dias.
 7. Gravar no sensor criado a tag `plan_retention_days` com o valor aplicado.
-8. Se o sensor ja existir, atualizar o `chunk_retention` e a tag `plan_retention_days` em vez de apenas ignorar.
+8. Se o sensor ja existir, atualizar `chunk_period`, `chunk_retention` e a tag `plan_retention_days` em vez de apenas ignorar.
 
 Exemplo do objeto de criacao/atualizacao do device:
 
 ```ts
 const retentionDays = resolveRetentionDaysFromPlan(centralDevice, organizationDevice);
+const retentionConfig = retentionDays > 36
+  ? { chunk_period: "month", chunk_retention: Math.ceil(retentionDays / 30) }
+  : { chunk_period: "day", chunk_retention: retentionDays };
 
 await account.devices.create({
   name: sensorName,
   type: "immutable",
-  chunk_period: "day",
-  chunk_retention: retentionDays,
+  chunk_period: retentionConfig.chunk_period,
+  chunk_retention: retentionConfig.chunk_retention,
   tags: [
     { key: "plan_retention_days", value: String(retentionDays) },
     { key: "central_sn", value: centralSN },

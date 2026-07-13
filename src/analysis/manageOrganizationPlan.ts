@@ -120,6 +120,29 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
     if (["false", "0", "nao", "não", "no", "inativo", "desabilitado"].includes(normalized)) return false;
     return fallback;
 }
+function getDeviceRetentionConfig(retentionDays: number): { chunk_period: "day" | "month"; chunk_retention: number } {
+    const days = Math.max(1, Math.floor(Number(retentionDays) || 1));
+
+    if (days > 36) {
+        return {
+            chunk_period: "month",
+            chunk_retention: Math.max(1, Math.ceil(days / 30))
+        };
+    }
+
+    return {
+        chunk_period: "day",
+        chunk_retention: days
+    };
+}
+
+function formatRetentionConfig(retentionDays: number): string {
+    const config = getDeviceRetentionConfig(retentionDays);
+    if (config.chunk_period === "month") {
+        return `${retentionDays} dias (${config.chunk_retention} ${config.chunk_retention === 1 ? "mês" : "meses"})`;
+    }
+    return `${retentionDays} dias`;
+}
 
 function resolveAssignmentPlan(basePlan: PlanDefinition, data: PlanAssignmentData, customOverrideSelected = false): { plan?: PlanDefinition; error?: string } {
     const alertLimit = parseLimit(data.custom_alert_limit);
@@ -324,6 +347,7 @@ async function listOrganizationDevices(resources: any, organization: Organizatio
 
 async function applyRetentionToOrganizationDevices(resources: any, organization: OrganizationRef, plan: PlanDefinition, planTags: any[]): Promise<number> {
     const devices = await listOrganizationDevices(resources, organization);
+    const retentionConfig = getDeviceRetentionConfig(plan.retentionDays);
     const uniqueDevices = new Map(devices.map((device) => [device.id, device]));
 
     if (organization.deviceId && !uniqueDevices.has(organization.deviceId)) {
@@ -339,7 +363,8 @@ async function applyRetentionToOrganizationDevices(resources: any, organization:
 
     for (const device of uniqueDevices.values()) {
         await resources.devices.edit(device.id, {
-            chunk_retention: plan.retentionDays,
+            chunk_period: retentionConfig.chunk_period,
+            chunk_retention: retentionConfig.chunk_retention,
             tags: upsertTags(device.tags || [], planTags)
         });
         updated += 1;
@@ -417,11 +442,14 @@ async function manageOrganizationPlan(context: any, scope: any[]) {
         ]
     };
     const planTags = buildPlanTags(plan, organization);
+    const retentionConfig = getDeviceRetentionConfig(plan.retentionDays);
+    const retentionLabel = formatRetentionConfig(plan.retentionDays);
 
     await resources.devices.edit(organizationDevice.id, {
-        chunk_retention: plan.retentionDays,
+        chunk_period: retentionConfig.chunk_period,
+        chunk_retention: retentionConfig.chunk_retention,
         tags: upsertTags(organizationDevice.tags || [], planTags)
-    });
+    } as any);
 
     const devicesUpdated = await applyRetentionToOrganizationDevices(resources, organization, plan, planTags);
 
@@ -446,6 +474,8 @@ async function manageOrganizationPlan(context: any, scope: any[]) {
             alert_limit: plan.alertLimit,
             report_limit: plan.reportLimit,
             retention_days: plan.retentionDays,
+            retention_chunk_period: retentionConfig.chunk_period,
+            retention_chunk_value: retentionConfig.chunk_retention,
             support_asana: plan.supportAsana,
             support_whatsapp: plan.supportWhatsapp,
             users_updated: organizationUsers.length,
@@ -457,12 +487,12 @@ async function manageOrganizationPlan(context: any, scope: any[]) {
     await sendValidation(
         resources,
         inputDeviceId,
-        `Plano ${plan.label} aplicado para ${organization.name}. Limites aplicados: ${plan.alertLimit} alertas, ${plan.reportLimit} relatórios e retenção de ${plan.retentionDays} dias. Devices atualizados: ${devicesUpdated}. Usuários atualizados: ${organizationUsers.length}. Alertas restantes: ${status.remaining.alerts}. Relatórios restantes: ${status.remaining.reports}.`,
+        `Plano ${plan.label} aplicado para ${organization.name}. Limites aplicados: ${plan.alertLimit} alertas, ${plan.reportLimit} relatórios e ${retentionLabel} de dados. Devices atualizados: ${devicesUpdated}. Usuários atualizados: ${organizationUsers.length}. Alertas restantes: ${status.remaining.alerts}. Relatórios restantes: ${status.remaining.reports}.`,
         "success",
         data.session_id
     );
 
-    context.log(`Plan ${plan.id} applied to organization ${organizationDevice.id}. users=${organizationUsers.length} devices=${devicesUpdated} retention=${plan.retentionDays}d`);
+    context.log(`Plan ${plan.id} applied to organization ${organizationDevice.id}. users=${organizationUsers.length} devices=${devicesUpdated} retention=${retentionLabel} chunk_period=${retentionConfig.chunk_period} chunk_retention=${retentionConfig.chunk_retention}`);
 }
 
 export { manageOrganizationPlan };

@@ -81,6 +81,29 @@ function parseRetentionDays(value: any): number | null {
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
     return Math.floor(parsed);
 }
+function getDeviceRetentionConfig(retentionDays: number): { chunk_period: "day" | "month"; chunk_retention: number } {
+    const days = Math.max(1, Math.floor(Number(retentionDays) || DEFAULT_RETENTION_DAYS));
+
+    if (days > 36) {
+        return {
+            chunk_period: "month",
+            chunk_retention: Math.max(1, Math.ceil(days / 30))
+        };
+    }
+
+    return {
+        chunk_period: "day",
+        chunk_retention: days
+    };
+}
+
+function formatRetentionConfig(retentionDays: number): string {
+    const config = getDeviceRetentionConfig(retentionDays);
+    if (config.chunk_period === "month") {
+        return `${retentionDays} dias (${config.chunk_retention} ${config.chunk_retention === 1 ? "mês" : "meses"})`;
+    }
+    return `${retentionDays} dias`;
+}
 
 function getRetentionDaysFromTags(tags: any[] | undefined): number | null {
     const explicitRetention = parseRetentionDays(
@@ -342,6 +365,8 @@ async function registerSensorDevice(
         const sensorType = SENSOR_TYPES_BY_MOD[sensorMod] || "irrigation";
         const sensorLabel = SENSOR_LABELS_BY_MOD[sensorMod] || SENSOR_LABELS[sensorType] || "Sensor";
         const sensorDeviceName = `${sensorLabel} ${sensorNumber} - Central ${centralSN}`;
+        const retentionConfig = getDeviceRetentionConfig(retentionDays);
+        const retentionLabel = formatRetentionConfig(retentionDays);
 
         // Verifica se o sensor já existe
         console.log(`🔍 Verificando se sensor ${serialNumber} já existe...`);
@@ -359,7 +384,8 @@ async function registerSensorDevice(
                 const existingDevice = listResponse[0];
                 await account.devices.edit(existingDevice.id, {
                     name: sensorDeviceName,
-                    chunk_retention: retentionDays,
+                    chunk_period: retentionConfig.chunk_period,
+                    chunk_retention: retentionConfig.chunk_retention,
                     tags: upsertTags(existingDevice.tags || [], [
                         { key: "plan_retention_days", value: String(retentionDays) },
                         { key: "central_sn", value: centralSN },
@@ -374,8 +400,8 @@ async function registerSensorDevice(
                         { key: "device_type", value: "device" },
                         { key: "dev_mode", value: devMode }
                     ])
-                });
-                console.log(`📡 Sensor ${serialNumber} já cadastrado. Tipo ${sensorLabel} e retenção ${retentionDays} dias atualizados.`);
+                } as any);
+                console.log(`📡 Sensor ${serialNumber} já cadastrado. Tipo ${sensorLabel} e retenção ${retentionLabel} atualizados.`);
                 return;
             }
         } catch (listError) {
@@ -390,8 +416,8 @@ async function registerSensorDevice(
             serie_number: serialNumber,
             connector: "669188217d61980008c18be1",
             network: "6686e259ffa21c0008faa296",
-            chunk_period: "day",
-            chunk_retention: retentionDays,
+            chunk_period: retentionConfig.chunk_period,
+            chunk_retention: retentionConfig.chunk_retention,
             tags: [
                 { key: "dev_eui", value: serialNumber },
                 { key: "central_sn", value: centralSN },
