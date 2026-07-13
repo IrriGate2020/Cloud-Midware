@@ -17,6 +17,15 @@ import axios from "axios";
 const ACCOUNT_TOKEN = "ff300c89-19a5-4446-9571-f276837dee18";
 const DEFAULT_RETENTION_DAYS = 30;
 
+const PLAN_RETENTION_DAYS: Record<string, number> = {
+    essencial: 7,
+    visualizacao: 7,
+    avancado: 30,
+    intermediario: 30,
+    premium: 90,
+    diamante: 90
+};
+
 const AUTO_TYPES: Record<number, string> = {
     0: "Nenhuma",
     1: "Irrigação",
@@ -34,6 +43,10 @@ function normalizeTagKey(value: any): string {
     return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 }
 
+function normalizeTagValue(value: any): string {
+    return normalizeTagKey(value).replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
 function getTagValue(tags: any[] | undefined, key: string): string | undefined {
     const wanted = normalizeTagKey(key);
     const tag = (tags || []).find((item) => normalizeTagKey(item?.key) === wanted);
@@ -49,26 +62,78 @@ function parseRetentionDays(value: any): number | null {
 }
 
 function getRetentionDaysFromTags(tags: any[] | undefined): number | null {
-    return parseRetentionDays(
+    const explicitRetention = parseRetentionDays(
         getTagValue(tags, "plan_retention_days") ||
         getTagValue(tags, "custom_retention_days") ||
         getTagValue(tags, "retention_days") ||
         getTagValue(tags, "retencao_dias")
     );
+
+    if (explicitRetention) return explicitRetention;
+
+    const planId = normalizeTagValue(
+        getTagValue(tags, "plan") ||
+        getTagValue(tags, "plano") ||
+        getTagValue(tags, "plan_id") ||
+        getTagValue(tags, "plano_id") ||
+        getTagValue(tags, "plan_name")
+    );
+
+    return PLAN_RETENTION_DAYS[planId] || null;
 }
 
-async function resolveRetentionDays(account: Account, centralDevice: any, organizationId?: string): Promise<number> {
+function upsertTags(tags: any[] | undefined, updates: any[]): any[] {
+    const updateKeys = new Set(updates.map((tag) => normalizeTagKey(tag.key)));
+    return [
+        ...(tags || []).filter((tag) => !updateKeys.has(normalizeTagKey(tag?.key))),
+        ...updates
+    ];
+}
+
+async function getDeviceByCandidate(account: Account, candidate?: string): Promise<any | null> {
+    if (!candidate) return null;
+
+    try {
+        return await account.devices.info(candidate);
+    } catch (_) {
+        // O candidato pode ser ID logico/nome/tag em vez de ID do device.
+    }
+
+    const tagKeys = ["organization_id", "organization_device", "org_id", "company_id", "group_id", "user_org_id"];
+    for (const key of tagKeys) {
+        try {
+            const devices = await account.devices.list({
+                page: 1,
+                amount: 1,
+                fields: ["id", "name", "tags"],
+                filter: { tags: [{ key, value: candidate }] }
+            });
+
+            if (devices.length) return devices[0];
+        } catch (_) {
+            // Continua tentando outros aliases.
+        }
+    }
+
+    return null;
+}
+
+async function resolveRetentionDays(account: Account, centralDevice: any, organizationId?: string, groupId?: string): Promise<number> {
     const centralRetention = getRetentionDaysFromTags(centralDevice.tags);
     if (centralRetention) return centralRetention;
 
-    if (organizationId) {
-        try {
-            const organizationDevice = await account.devices.info(organizationId);
-            const organizationRetention = getRetentionDaysFromTags(organizationDevice.tags);
-            if (organizationRetention) return organizationRetention;
-        } catch (_) {
-            // Algumas instalacoes ainda guardam organization_id como identificador logico, nao como ID do device.
-        }
+    const candidates = Array.from(new Set([
+        getTagValue(centralDevice.tags, "organization_device"),
+        organizationId,
+        getTagValue(centralDevice.tags, "org_id"),
+        getTagValue(centralDevice.tags, "company_id"),
+        groupId
+    ].filter(Boolean).map((item) => String(item))));
+
+    for (const candidate of candidates) {
+        const device = await getDeviceByCandidate(account, candidate);
+        const retention = getRetentionDaysFromTags(device?.tags);
+        if (retention) return retention;
     }
 
     return DEFAULT_RETENTION_DAYS;
@@ -159,6 +224,7 @@ export async function autoRegisterSensors(
         const centralDevices = await account.devices.list({
             page: 1,
             amount: 1,
+            fields: ["id", "name", "tags"],
             filter: {
                 tags: [
                     { key: "serial_number", value: data.SN }
@@ -176,7 +242,7 @@ export async function autoRegisterSensors(
         // Extrai group_id e organization_id das tags da central
         const groupId = getTagValue(centralDevice.tags, "group_id");
         const organizationId = getTagValue(centralDevice.tags, "organization_id");
-        const retentionDays = await resolveRetentionDays(account, centralDevice, organizationId);
+        const retentionDays = await resolveRetentionDays(account, centralDevice, organizationId, groupId);
 
         if (!groupId) {
             console.warn(`⚠️ Tag 'group_id' não encontrada na central ${data.SN}`);
@@ -251,13 +317,25 @@ async function registerSensorDevice(
             const listResponse = await account.devices.list({ 
                 page: 1, 
                 amount: 1,
+                fields: ["id", "name", "tags"],
                 filter: {
                     tags: [{ key: "dev_eui", value: serialNumber }]
                 }
             });
             console.log(`Resposta da verificação de existência do sensor ${serialNumber}:`, listResponse);
             if (listResponse && listResponse.length > 0) {
-                console.log(`📡 Sensor ${serialNumber} já cadastrado`);
+                const existingDevice = listResponse[0];
+                await account.devices.edit(existingDevice.id, {
+                    chunk_retention: retentionDays,
+                    tags: upsertTags(existingDevice.tags || [], [
+                        { key: "plan_retention_days", value: String(retentionDays) },
+                        { key: "central_sn", value: centralSN },
+                        { key: "sensor_number", value: sensorNumber },
+                        ...(groupId ? [{ key: "group_id", value: groupId }] : []),
+                        ...(organizationId ? [{ key: "organization_id", value: organizationId }] : [])
+                    ])
+                });
+                console.log(`📡 Sensor ${serialNumber} já cadastrado. Retenção atualizada para ${retentionDays} dias.`);
                 return;
             }
         } catch (listError) {

@@ -183,7 +183,7 @@
 
       .metric-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 9px;
         margin-bottom: 16px;
       }
@@ -392,11 +392,13 @@
           sensors: "5",
           alerts: "0",
           reports: "0",
+          retention: "7",
           icon: "eye",
           features: [
             ["Até 5 sensores cadastrados", true],
             ["Alertas automáticos não inclusos", false],
             ["Relatórios automáticos não inclusos", false],
+            ["Retenção de dados por 7 dias", true],
             ["Abertura de chamados diretamente com o time de suporte não inclusa", false],
             ["Atendimento por WhatsApp não incluso", false],
             ["Tempo de resposta dedicado não incluso", false]
@@ -410,11 +412,13 @@
           sensors: "10",
           alerts: "10",
           reports: "1",
+          retention: "30",
           icon: "bell",
           features: [
             ["Até 10 sensores cadastrados", true],
             ["10 alertas configuráveis", true],
             ["1 relatório disponível", true],
+            ["Retenção de dados por 30 dias", true],
             ["Abertura de chamados diretamente com o time de suporte", true],
             ["Atendimento por WhatsApp não incluso", false],
             ["Atendimentos críticos: até 6 horas úteis", true]
@@ -428,12 +432,14 @@
           sensors: "30",
           alerts: "30",
           reports: "5",
+          retention: "90",
           icon: "diamond",
           featured: true,
           features: [
             ["Até 30 sensores cadastrados", true],
             ["30 alertas configuráveis", true],
             ["5 relatórios disponíveis", true],
+            ["Retenção de dados por 90 dias", true],
             ["Abertura de chamados diretamente com o time de suporte", true],
             ["Abertura de chamados integrado com o Whatsapp", true],
             ["Atendimentos críticos: até 3 horas úteis ou até 6 horas em dias não úteis", true]
@@ -479,6 +485,10 @@
                   <span class="metric-value">${plan.reports}</span>
                   <span class="metric-label">relatórios</span>
                 </div>
+                <div class="metric">
+                  <span class="metric-value">${plan.retention}</span>
+                  <span class="metric-label">dias de retenção</span>
+                </div>
               </div>
               <ul class="feature-list">${features}</ul>
             </div>
@@ -496,7 +506,7 @@
                   <h1 class="plans-title">Planos IrriGate</h1>
                   <p class="plans-subtitle">
                     Escolha o plano ideal para o tamanho da operação. Cada opção define quantos sensores,
-                    alertas, relatórios e canais de suporte ficam disponíveis para a organização.
+                    alertas, relatórios, retenção de dados e canais de suporte ficam disponíveis para a organização.
                     Entre em contato para planos personalizados.
                   </p>
                 </div>
@@ -531,7 +541,8 @@
                   <ul class="status-list">
                     <li><span class="status-dot"></span><span>Alertas e relatórios são descontados quando criados no sistema.</span></li>
                     <li><span class="status-dot green"></span><span>O status da organização mostra usados, restantes e limite contratado.</span></li>
-                    <li><span class="status-dot gold"></span><span>O limite de sensores depende do fluxo de cadastro de sensores da organização.</span></li>
+                    <li><span class="status-dot gold"></span><span>A retenção aplicada nos devices segue o plano: 7 dias no Essencial, 30 dias no Avançado e 90 dias no Premium.</span></li>
+                    <li><span class="status-dot"></span><span>O limite de sensores depende do fluxo de cadastro de sensores da organização.</span></li>
                   </ul>
                 </aside>
               </section>
