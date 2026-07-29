@@ -1,4 +1,5 @@
 import { Analysis, Resources } from "@tago-io/sdk";
+import { alertAnalysis } from "./alertAnalysis";
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -204,6 +205,22 @@ async function timerDuration(context: any, scope: any[]) {
 
     context.log(`Timer_duration sent: ${currentONDUR}`);
     context.log(`  - Group: ${sessionGroup} (same as timer_start)`);
+
+    try {
+      await alertAnalysis(context, [{
+        ...dataPoint,
+        variable: "timer_duration",
+        value: String(currentONDUR),
+        group: sessionGroup,
+        device: device_id,
+        metadata: {
+          ...(dataPoint.metadata || {}),
+          ONDUR: String(currentONDUR),
+        },
+      }]);
+    } catch (alertError) {
+      context.log(`Error checking duration alerts: ${alertError}`);
+    }
 
     return;
   }

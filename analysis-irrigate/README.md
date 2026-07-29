@@ -29,7 +29,7 @@ Quando a analysis-irrigate criar um novo device de sensor, ela deve:
 5. Criar o device convertendo a retencao para o formato aceito pela TagoIO: ate 36 dias use `chunk_period: "day"`; acima de 36 dias use `chunk_period: "month"` e `chunk_retention = ceil(dias / 30)`.
 6. Se nenhuma retencao estiver configurada, usar fallback de 30 dias.
 7. Gravar no sensor criado a tag `plan_retention_days` com o valor aplicado.
-8. Se o sensor ja existir, atualizar `chunk_period`, `chunk_retention` e a tag `plan_retention_days` em vez de apenas ignorar.
+8. Se o sensor ja existir, atualizar `chunk_period`, `chunk_retention` e tags tecnicas, mas nunca atualizar o `name`; o nome editado pelo usuario na TagoIO deve ser preservado.
 
 Exemplo do objeto de criacao/atualizacao do device:
 
@@ -94,4 +94,4 @@ O campo `MOD` define o tipo do sensor/dispositivo criado na TagoIO:
 - 5: Clima
 - 6: Climaprime (usa sensor=climate)
 
-Para o Climaprime, `MOD = 6` deve criar o device com `sensor=climate`, `sensor_label=Climaprime` e nome iniciando com `Climaprime`. O autocadastro usa o dashboard com `connector_id=climate`.
+Para o Climaprime, `MOD = 6` deve criar o device com `sensor=climate`, `sensor_label=Climaprime` e nome iniciando com `Climaprime`. O autocadastro usa o dashboard com `connector_id=climate`. Tambem grave `application=climate` e `application_label=UTC - ClimaPrime` para listas/tabelas exibirem ClimaPrime mesmo quando `Auto` indicar monitoramento ou automacao.

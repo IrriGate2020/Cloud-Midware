@@ -29,6 +29,7 @@ interface PlanAssignmentData {
     custom_retention_days?: string;
     support_asana?: string;
     support_whatsapp?: string;
+    run_user?: string;
     session_id?: string;
 }
 
@@ -92,16 +93,24 @@ function extractPlanAssignment(scope: any[]): PlanAssignmentData {
             "plan_retention_days",
             "retention_days",
             "retencao_dias",
-            "retenção_dias",
+            "reten\u00e7\u00e3o_dias",
             "retencao",
-            "retenção",
+            "reten\u00e7\u00e3o",
             "dias_retencao",
-            "dias_retenção",
+            "dias_reten\u00e7\u00e3o",
+            "dias_de_dados",
+            "periodo_retencao",
+            "periodo_reten\u00e7\u00e3o",
             "limite_retencao",
-            "limite_retenção"
+            "limite_reten\u00e7\u00e3o",
+            "limite_retencao_dias",
+            "limite_reten\u00e7\u00e3o_dias",
+            "retention_limit",
+            "data_retention_days"
         ]),
         support_asana: getString(groupScope, ["support_asana", "suporte_asana"]),
         support_whatsapp: getString(groupScope, ["support_whatsapp", "suporte_whatsapp"]),
+        run_user: getString(groupScope, ["run_user", "user", "user_id", "usuario", "usuario_id", "email", "user_email", "run_user_email"]),
         session_id: getString(groupScope, ["session_id", "plan_session_id", "input_session_id"])
     };
 }
@@ -273,6 +282,21 @@ async function listRunUsers(resources: any): Promise<any[]> {
     return users;
 }
 
+function userMatchesExplicitValue(user: any, value?: string): boolean {
+    if (!value) return false;
+    const wanted = normalizeText(value);
+    const userValues = [
+        user.id,
+        user.email,
+        user.name,
+        user.company,
+        getTagValue(user.tags, "user_org_id"),
+        getTagValue(user.tags, "organization_id"),
+        getTagValue(user.tags, "organization_device")
+    ].filter(Boolean).map((item) => normalizeText(item));
+
+    return userValues.some((item) => item === wanted);
+}
 function userBelongsToOrganization(user: any, organization: OrganizationRef): boolean {
     const wanted = [
         organization.id,
@@ -398,7 +422,8 @@ async function manageOrganizationPlan(context: any, scope: any[]) {
     const data = extractPlanAssignment(scope);
     context.log(`Plan assignment extracted: ${JSON.stringify(data)}`);
 
-    const customOverrideSelected = normalizeText(data.plan) === "custom";
+    const normalizedPlanInput = normalizeFieldName(data.plan);
+    const customOverrideSelected = ["custom", "custon", "personalizado", "personalizada"].includes(normalizedPlanInput);
     const selectedPlanValue = customOverrideSelected ? data.base_plan : data.plan;
     const basePlan = getPlanDefinition(selectedPlanValue);
 
@@ -454,7 +479,13 @@ async function manageOrganizationPlan(context: any, scope: any[]) {
     const devicesUpdated = await applyRetentionToOrganizationDevices(resources, organization, plan, planTags);
 
     const users = await listRunUsers(resources);
-    const organizationUsers = users.filter((user) => userBelongsToOrganization(user, organization));
+    const organizationUsersMap = new Map<string, any>();
+
+    users
+        .filter((user) => userBelongsToOrganization(user, organization) || userMatchesExplicitValue(user, data.run_user))
+        .forEach((user) => organizationUsersMap.set(user.id, user));
+
+    const organizationUsers = Array.from(organizationUsersMap.values());
 
     for (const user of organizationUsers) {
         await resources.run.userEdit(user.id, {

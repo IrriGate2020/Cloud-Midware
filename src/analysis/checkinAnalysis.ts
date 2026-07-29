@@ -50,10 +50,15 @@ async function checkinAnalysis(context: any, scope: any[]) {
         });
 
         // Filtrar apenas dispositivos que são grupos
-        const group_devices = all_devices.filter((device: any) => {
+        let group_devices = all_devices.filter((device: any) => {
             const type_tag = device.tags?.find((tag: any) => tag.key === "device_type");
             return type_tag && type_tag.value === "group";
         });
+
+        if (!group_devices.length) {
+            context.log("No device_type=group found; using all devices as alert containers fallback");
+            group_devices = all_devices;
+        }
 
         context.log(`Found ${group_devices.length} group devices to check`);
 
@@ -212,10 +217,15 @@ async function checkinAnalysis(context: any, scope: any[]) {
         // 4. Buscar centrais e verificar alertas de checkin nelas
         context.log("Checking checkin alerts for central devices...");
         
-        const central_devices = all_devices.filter((device: any) => {
+        let central_devices = all_devices.filter((device: any) => {
             const type_tag = device.tags?.find((tag: any) => tag.key === "device_type");
             return type_tag && type_tag.value === "group";
         });
+
+        if (!central_devices.length) {
+            context.log("No device_type=group found for central checkin; using all devices as alert containers fallback");
+            central_devices = all_devices;
+        }
 
         context.log(`Found ${central_devices.length} central devices to check`);
 

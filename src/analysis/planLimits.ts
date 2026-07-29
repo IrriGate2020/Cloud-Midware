@@ -136,6 +136,22 @@ function parseBoolean(value: any, fallback: boolean): boolean {
     return fallback;
 }
 
+function getDeviceRetentionConfig(retentionDays: number): { chunk_period: "day" | "month"; chunk_retention: number } {
+    const days = Math.max(1, Math.floor(Number(retentionDays) || 1));
+
+    if (days > 36) {
+        return {
+            chunk_period: "month",
+            chunk_retention: Math.max(1, Math.ceil(days / 30))
+        };
+    }
+
+    return {
+        chunk_period: "day",
+        chunk_retention: days
+    };
+}
+
 export function getTagValue(tags: any[] | undefined, key: string): string | undefined {
     const tag = (tags || []).find((item) => normalizeText(item?.key) === normalizeText(key));
     if (tag?.value === undefined || tag?.value === null || tag?.value === "") return undefined;
@@ -171,17 +187,44 @@ export function getPlanFromTags(tags: any[] | undefined): PlanDefinition | null 
     return null;
 }
 
+function getLegacyPlanId(planId: PlanId): string {
+    if (planId === "essencial") return "visualizacao";
+    if (planId === "avancado") return "intermediario";
+    if (planId === "premium") return "diamante";
+    return planId;
+}
+
+function getPlanFeatureTags(plan: PlanDefinition): any[] {
+    const alertsEnabled = plan.alertLimit > 0;
+    const reportsEnabled = plan.reportLimit > 0;
+    const supportEnabled = plan.supportAsana || plan.supportWhatsapp;
+
+    return [
+        { key: "alerts_enabled", value: String(alertsEnabled) },
+        { key: "alertas_enabled", value: String(alertsEnabled) },
+        { key: "reports_enabled", value: String(reportsEnabled) },
+        { key: "relatorios_enabled", value: String(reportsEnabled) },
+        { key: "support_enabled", value: String(supportEnabled) },
+        { key: "suporte_enabled", value: String(supportEnabled) }
+    ];
+}
 export function buildPlanTags(plan: PlanDefinition, organization: { id?: string; name?: string; deviceId?: string }): any[] {
+    const legacyPlanId = getLegacyPlanId(plan.id);
     const tags = [
         { key: "plan", value: plan.id },
         { key: "plano", value: plan.id },
+        { key: "plan", value: legacyPlanId },
+        { key: "plano", value: legacyPlanId },
+        { key: "plan_legacy", value: legacyPlanId },
+        { key: "plano_legacy", value: legacyPlanId },
         { key: "plan_name", value: plan.label },
         { key: "plan_device_limit", value: String(plan.deviceLimit) },
         { key: "plan_alert_limit", value: String(plan.alertLimit) },
         { key: "plan_report_limit", value: String(plan.reportLimit) },
         { key: "plan_retention_days", value: String(plan.retentionDays) },
         { key: "support_asana", value: String(plan.supportAsana) },
-        { key: "support_whatsapp", value: String(plan.supportWhatsapp) }
+        { key: "support_whatsapp", value: String(plan.supportWhatsapp) },
+        ...getPlanFeatureTags(plan)
     ];
 
     if (organization.id) {
@@ -435,6 +478,7 @@ export async function publishPlanStatus(resources: any, organizationDeviceId: st
     const remaining = getRemaining(plan, usage);
     const now = new Date().toISOString();
     const billingPeriodStart = (await getPlanUsagePeriodStart(resources, organizationDeviceId)).toISOString();
+    const retentionConfig = getDeviceRetentionConfig(plan.retentionDays);
 
     await deleteDeviceDataByVariables(resources, organizationDeviceId, PLAN_STATUS_VARIABLES).catch(() => 0);
 
@@ -449,6 +493,8 @@ export async function publishPlanStatus(resources: any, organizationDeviceId: st
                 alert_limit: plan.alertLimit,
                 report_limit: plan.reportLimit,
                 retention_days: plan.retentionDays,
+                retention_chunk_period: retentionConfig.chunk_period,
+                retention_chunk_value: retentionConfig.chunk_retention,
                 alerts_used: usage.alerts,
                 reports_used: usage.reports,
                 alerts_remaining: remaining.alerts,
@@ -517,6 +563,8 @@ export async function publishPlanStatus(resources: any, organizationDeviceId: st
             value: plan.retentionDays,
             metadata: {
                 plan_id: plan.id,
+                retention_chunk_period: retentionConfig.chunk_period,
+                retention_chunk_value: retentionConfig.chunk_retention,
                 updated_at: now
             }
         }

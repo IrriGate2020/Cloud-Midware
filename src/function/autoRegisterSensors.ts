@@ -134,6 +134,58 @@ function upsertTags(tags: any[] | undefined, updates: any[]): any[] {
     ];
 }
 
+async function configureDashboardUrl(
+    account: Account,
+    deviceId: string,
+    serialNumber: string,
+    sensorType: string,
+    groupId?: string,
+    organizationId?: string
+): Promise<void> {
+    const dashboardMap: { [key: string]: string[] } = {
+        irrigation: ["irrigation"],
+        nutrition: ["nutrition"],
+        nutrition_2: ["nutrition_2"],
+        illumination: ["illumination"],
+        climate: ["climate"]
+    };
+
+    const connectorTypes = dashboardMap[sensorType] || [];
+    if (!connectorTypes.length) return;
+
+    let dash: any | undefined;
+
+    for (const candidate of connectorTypes) {
+        const [foundDash] = await account.dashboards.list({
+            amount: 1,
+            fields: ["id", "tags"],
+            filter: {
+                tags: [{ key: "connector_id", value: candidate }]
+            }
+        });
+
+        if (foundDash) {
+            dash = foundDash;
+            break;
+        }
+    }
+
+    if (!dash) {
+        console.warn("Dashboard nao encontrado para tipo " + sensorType);
+        return;
+    }
+
+    const dashboardUrl = "https://admin.tago.io/dashboards/info/" + dash.id + "?org_dev=" + organizationId + "&group_dev=" + groupId + "&sensor=" + deviceId;
+
+    await account.devices.paramSet(deviceId, {
+        key: "dashboard_url",
+        value: dashboardUrl,
+        sent: false
+    });
+
+    console.log("Dashboard URL configurado para sensor " + serialNumber + " com tipo " + sensorType);
+}
+
 async function getDeviceByCandidate(account: Account, candidate?: string): Promise<any | null> {
     if (!candidate) return null;
 
@@ -364,6 +416,7 @@ async function registerSensorDevice(
         const sensorMod = Number(sensorConfig.MOD);
         const sensorType = SENSOR_TYPES_BY_MOD[sensorMod] || "irrigation";
         const sensorLabel = SENSOR_LABELS_BY_MOD[sensorMod] || SENSOR_LABELS[sensorType] || "Sensor";
+        const applicationLabel = sensorMod === 6 ? "UTC - ClimaPrime" : `UTC - ${sensorLabel}`;
         const sensorDeviceName = `${sensorLabel} ${sensorNumber} - Central ${centralSN}`;
         const retentionConfig = getDeviceRetentionConfig(retentionDays);
         const retentionLabel = formatRetentionConfig(retentionDays);
@@ -383,7 +436,6 @@ async function registerSensorDevice(
             if (listResponse && listResponse.length > 0) {
                 const existingDevice = listResponse[0];
                 await account.devices.edit(existingDevice.id, {
-                    name: sensorDeviceName,
                     chunk_period: retentionConfig.chunk_period,
                     chunk_retention: retentionConfig.chunk_retention,
                     tags: upsertTags(existingDevice.tags || [], [
@@ -396,11 +448,18 @@ async function registerSensorDevice(
                         { key: "auto_label", value: autoLabel },
                         { key: "sensor", value: sensorType },
                         { key: "sensor_label", value: sensorLabel },
+                        { key: "application", value: sensorType },
+                        { key: "application_label", value: applicationLabel },
                         { key: "sensor_mod", value: String(sensorConfig.MOD ?? "") },
                         { key: "device_type", value: "device" },
                         { key: "dev_mode", value: devMode }
                     ])
                 } as any);
+                try {
+                    await configureDashboardUrl(account, existingDevice.id, serialNumber, sensorType, groupId, organizationId);
+                } catch (dashError) {
+                    console.warn("Erro ao atualizar dashboard_url do sensor existente:", dashError);
+                }
                 console.log(`📡 Sensor ${serialNumber} já cadastrado. Tipo ${sensorLabel} e retenção ${retentionLabel} atualizados.`);
                 return;
             }
@@ -429,6 +488,8 @@ async function registerSensorDevice(
                 { key: "auto_label", value: autoLabel },
                 { key: "sensor", value: sensorType },
                 { key: "sensor_label", value: sensorLabel },
+                { key: "application", value: sensorType },
+                { key: "application_label", value: applicationLabel },
                 { key: "sensor_mod", value: String(sensorConfig.MOD ?? "") },
                 { key: "device_type", value: "device" },
                 { key: "dev_mode", value: devMode },

@@ -44,6 +44,68 @@ function getVariableLabel(variable: string): string {
     return variableLabels[variable] || variable;
 }
 
+function normalizeAlertVariable(variable: string): string {
+    const raw = String(variable || '').trim();
+    const normalized = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (['erro', 'error', 'erro_leitura', 'erro_de_leitura'].includes(normalized)) return 'ERRO';
+    return raw;
+}
+
+function isErrorAlertVariable(variable: string): boolean {
+    return normalizeAlertVariable(variable) === 'ERRO';
+}
+
+function getActiveErrorCodesFromMetadata(metadata: any): string[] {
+    const codesFromString = String(metadata?.codigos || metadata?.erro_codigos || metadata?.label || '')
+        .split(/[,|]/)
+        .map((item) => item.trim().match(/E[SA]\d{3}/)?.[0])
+        .filter(Boolean) as string[];
+
+    const errorsObject = metadata?.ERRO && typeof metadata.ERRO === 'object' ? metadata.ERRO : null;
+    const codesFromObject = errorsObject
+        ? Object.entries(errorsObject).filter(([, value]) => Number(value) > 0).map(([code]) => code)
+        : [];
+
+    return Array.from(new Set([...codesFromString, ...codesFromObject]));
+}
+
+function getActiveErrorCodesFromValue(value: any, metadata: any): string[] {
+    const textCodes = String(value || '')
+        .split(/[,|]/)
+        .map((item) => item.trim().match(/E[SA]\d{3}/)?.[0])
+        .filter(Boolean) as string[];
+    return Array.from(new Set([...textCodes, ...getActiveErrorCodesFromMetadata(metadata)]));
+}
+
+function evaluateErrorCondition(currentValue: any, currentMetadata: any, condition: string, thresholdValue: any): boolean | null {
+    const activeCodes = getActiveErrorCodesFromValue(currentValue, currentMetadata);
+    const activeValue = activeCodes.length > 0 || currentMetadata?.active === true || currentMetadata?.erro_ativo === true || currentValue === 1 || currentValue === true ? 1 : 0;
+    const thresholdText = String(thresholdValue ?? '').trim().toUpperCase();
+    const thresholdCode = thresholdText.match(/E[SA]\d{3}/)?.[0];
+
+    if (thresholdCode) {
+        const hasCode = activeCodes.includes(thresholdCode);
+        if (condition === '==') return hasCode;
+        if (condition === '!=') return !hasCode;
+        return hasCode;
+    }
+
+    if (thresholdText === '' || thresholdText === 'TRUE' || thresholdText === 'ATIVO') {
+        if (condition === '!=' ) return activeValue === 0;
+        return activeValue === 1;
+    }
+
+    const thresholdNum = Number(String(thresholdValue).replace(',', '.'));
+    if (!Number.isFinite(thresholdNum)) return null;
+    if (condition === '==') return activeValue === thresholdNum;
+    if (condition === '!=') return activeValue !== thresholdNum;
+    if (condition === '>=') return activeValue >= thresholdNum;
+    if (condition === '>') return activeValue > thresholdNum;
+    if (condition === '<=') return activeValue <= thresholdNum;
+    if (condition === '<') return activeValue < thresholdNum;
+    return null;
+}
+
 function parseTimeLikeValue(value: any): number | null {
     if (value === undefined || value === null || value === "") return null;
     if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -60,12 +122,15 @@ function parseTimeLikeValue(value: any): number | null {
 }
 
 function getComparableValue(variable: string, value: any): number | null {
-    if (["ONDUR", "ONSTR"].includes(variable)) return parseTimeLikeValue(value);
+    if (["ONDUR", "ONSTR", "timer_duration"].includes(variable)) return parseTimeLikeValue(value);
     const parsed = Number(String(value).replace(",", "."));
     return Number.isFinite(parsed) ? parsed : null;
 }
 
-function evaluateCondition(variable: string, currentValue: any, condition: string, thresholdValue: any): boolean {
+function evaluateCondition(variable: string, currentValue: any, condition: string, thresholdValue: any, currentMetadata: any = {}): boolean {
+    const errorCondition = isErrorAlertVariable(variable) ? evaluateErrorCondition(currentValue, currentMetadata, condition, thresholdValue) : null;
+    if (errorCondition !== null) return errorCondition;
+
     if (condition === "==" || condition === "!=") {
         const currentComparable = getComparableValue(variable, currentValue);
         const thresholdComparable = getComparableValue(variable, thresholdValue);
@@ -157,7 +222,7 @@ async function alertAnalysis(context: any, scope: any[]) {
             continue;
         }
 
-        const alert_variable = alert_metadata.alert_variable;
+        const alert_variable = normalizeAlertVariable(alert_metadata.alert_variable);
 
         // 5. Buscar o valor atual da variável no dispositivo que disparou
         try {
@@ -167,13 +232,24 @@ async function alertAnalysis(context: any, scope: any[]) {
 
             // Primeiro, tentar buscar a variável diretamente
             const target_data = await resources.devices.getDeviceData(device_id, {
-                variables: [alert_variable],
+                variables: isErrorAlertVariable(alert_variable) ? ["ERRO", "erro"] : [alert_variable],
                 qty: 1
             });
 
             if (target_data.length > 0) {
                 current_value = target_data[0].value;
                 current_metadata = target_data[0].metadata || {};
+                if (isErrorAlertVariable(alert_variable)) {
+                    const activeCodes = getActiveErrorCodesFromValue(current_value, current_metadata);
+                    current_metadata = {
+                        ...current_metadata,
+                        label: current_metadata.codigos || current_metadata.erro_codigos || activeCodes.join(", ") || "Sem erro",
+                        description: current_metadata.detalhes?.map?.((item: any) => item.code + ": " + item.label).join(" | ") || current_value,
+                        severity: activeCodes.length ? "critical" : "ok",
+                        active_codes: activeCodes
+                    };
+                    current_value = activeCodes.length > 0 ? 1 : 0;
+                }
                 value_found = true;
             } else {
                 // Se não encontrou como variável standalone, buscar na variável "data" metadata
@@ -211,7 +287,7 @@ async function alertAnalysis(context: any, scope: any[]) {
             const threshold_value = alert_metadata.threshold_value;
 
             context.log(`Checking alert: ${alert_variable} ${condition} ${threshold_value}, current: ${current_value}`);
-            const should_trigger = evaluateCondition(alert_variable, current_value, condition, threshold_value);
+            const should_trigger = evaluateCondition(alert_variable, current_value, condition, threshold_value, current_metadata);
 
             // Disparar notificação se necessário
             if (should_trigger) {
