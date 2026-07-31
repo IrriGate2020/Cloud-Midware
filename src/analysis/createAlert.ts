@@ -43,6 +43,10 @@ function getVariableLabel(variable: string): string {
     return variableLabels[variable] || variable;
 }
 
+function createAlertUid(): string {
+    return `alert_1785526449221_aws4i3t1`;
+}
+
 async function createAlert(context: any, scope: any[]) {
     console.log("Running Analysis - Creating Alert");
     console.log(scope);
@@ -216,8 +220,11 @@ async function createAlert(context: any, scope: any[]) {
         return context.log("Cannot create alert: organization plan limit reached");
     }
 
+    const alert_uid = createAlertUid();
+
     // Preparar metadata baseado no tipo de alerta
     const alert_metadata: any = {
+        alert_uid: alert_uid,
         alert_variable: alertData.alert_variable,
         device_id: alertData.alert_device,
         send_to: alertData.alert_send_to,

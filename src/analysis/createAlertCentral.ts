@@ -35,6 +35,10 @@ function getVariableLabel(variable: string): string {
     return variableLabels[variable] || variable;
 }
 
+function createAlertUid(): string {
+    return `alert_1785526449983_qudmkhis`;
+}
+
 async function createAlertCentral(context: any, scope: any[]) {
     console.log("Running Analysis - Creating Alert for Central");
     console.log(scope);
@@ -204,8 +208,11 @@ async function createAlertCentral(context: any, scope: any[]) {
         alert_description = `Alerta para ${variable_label} do(a) ${device_name} quando o seu valor for ${condition_text} ${alertData.alert_value}${user_name ? ` será enviado para o usuário ${user_name}` : ''}`;
     }
 
+    const alert_uid = createAlertUid();
+
     // Preparar metadata do alerta
     const alert_metadata: any = {
+        alert_uid: alert_uid,
         alert_variable: alertData.alert_variable,
         device_id: alertData.alert_device,
         send_to: alertData.alert_send_to,

@@ -429,25 +429,39 @@ export async function deleteDeviceDataByVariables(resources: any, deviceId: stri
     return deleteDeviceDataIds(resources, deviceId, ids);
 }
 
-async function getOrganizationAlertSourceDeviceIds(resources: any, organizationDeviceId: string): Promise<string[]> {
+export async function getOrganizationAlertSourceDeviceIds(resources: any, organizationDeviceId: string): Promise<string[]> {
+    const ids: string[] = [];
+
     try {
         const groupRefs = await resources.devices.getDeviceData(organizationDeviceId, {
             variables: ["group_id"],
             qty: 9999
         });
-        const ids = (groupRefs || [])
+
+        ids.push(...(groupRefs || [])
             .map((item: any) => item?.value)
             .filter((value: any) => value !== undefined && value !== null && value !== "")
-            .map((value: any) => String(value));
-
-        if (ids.length) {
-            return Array.from(new Set(ids));
-        }
+            .map((value: any) => String(value)));
     } catch (_) {
-        // Nem toda organização tem group_id salvo como dado.
+        // Nem toda organiza??o tem group_id salvo como dado.
     }
 
-    return [organizationDeviceId];
+    try {
+        const organizationAlertRecords = await resources.devices.getDeviceData(organizationDeviceId, {
+            variables: ["alertas"],
+            qty: 9999
+        });
+
+        ids.push(...(organizationAlertRecords || [])
+            .map((item: any) => item?.metadata?.source_group_device)
+            .filter((value: any) => value !== undefined && value !== null && value !== "")
+            .map((value: any) => String(value)));
+    } catch (_) {
+        // Registros antigos podem n?o ter copia de uso na organiza??o.
+    }
+
+    const uniqueIds = Array.from(new Set(ids.filter((id) => id && id !== organizationDeviceId)));
+    return uniqueIds.length ? uniqueIds : [organizationDeviceId];
 }
 
 export async function getPlanUsage(resources: any, organizationDeviceId: string): Promise<PlanUsage> {
