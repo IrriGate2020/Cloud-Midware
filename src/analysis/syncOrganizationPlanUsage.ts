@@ -34,6 +34,38 @@ function extractSyncPlanData(scope: any[]): SyncPlanData {
     };
 }
 
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelayMs(error: any, attempt: number): number {
+    const text = String(error?.message || error || "");
+    const retryAfterMatch = text.match(/Retry-After:\s*(\d+)/i);
+    const retryAfterSeconds = retryAfterMatch ? Number(retryAfterMatch[1]) : 0;
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) return retryAfterSeconds * 1000 + 500;
+    return Math.min(30000, 1000 * Math.pow(2, attempt));
+}
+
+function isRateLimitError(error: any): boolean {
+    const text = String(error?.message || error || "").toLowerCase();
+    return text.includes("too many requests") || text.includes("retry-after") || error?.status === 429 || error?.statusCode === 429;
+}
+
+async function withRateLimitRetry<T>(operation: () => Promise<T>, attempts = 5): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+            if (!isRateLimitError(error) || attempt === attempts - 1) throw error;
+            await sleep(getRetryDelayMs(error, attempt));
+        }
+    }
+
+    throw lastError;
+}
 function normalizeValue(value: any): string {
     if (value === undefined || value === null) return "";
     return String(value).trim().toLowerCase();
@@ -60,7 +92,7 @@ async function deleteDeviceDataIds(resources: any, deviceId: string, ids: string
         const batch = uniqueIds.slice(index, index + 100);
         if (!batch.length) continue;
 
-        await resources.devices.deleteDeviceData(deviceId, { ids: batch });
+        await withRateLimitRetry(() => resources.devices.deleteDeviceData(deviceId, { ids: batch }));
         deleted += batch.length;
     }
 
@@ -68,18 +100,22 @@ async function deleteDeviceDataIds(resources: any, deviceId: string, ids: string
 }
 
 async function pruneOrganizationAlertUsageRecords(resources: any, organizationDeviceId: string, context: any): Promise<number> {
-    const organizationAlerts = await resources.devices.getDeviceData(organizationDeviceId, {
+    const organizationAlerts = await withRateLimitRetry<any[]>(() => resources.devices.getDeviceData(organizationDeviceId, {
         variables: ["alertas"],
         qty: 9999
-    }).catch(() => []);
+    })).catch(() => []);
 
     const usageRecords = (organizationAlerts || []).filter((item: any) => Boolean(item?.metadata?.organization_usage_record));
     if (!usageRecords.length) return 0;
 
     const sourceDeviceIds = await getOrganizationAlertSourceDeviceIds(resources, organizationDeviceId);
-    const sourceAlertGroups = await Promise.all(sourceDeviceIds.map((deviceId) =>
-        resources.devices.getDeviceData(deviceId, { variables: ["alertas"], qty: 9999 }).catch(() => [])
-    ));
+    const sourceAlertGroups: any[] = [];
+    for (const deviceId of sourceDeviceIds) {
+        const alerts = await withRateLimitRetry<any[]>(() =>
+            resources.devices.getDeviceData(deviceId, { variables: ["alertas"], qty: 9999 })
+        ).catch(() => []);
+        sourceAlertGroups.push(alerts || []);
+    }
 
     const activeSourceAlerts = sourceAlertGroups.flat().filter((item: any) => {
         if (item?.metadata?.organization_usage_record) return false;
@@ -106,7 +142,7 @@ async function pruneOrganizationAlertUsageRecords(resources: any, organizationDe
     return deleted;
 }
 async function sendValidation(resources: any, deviceId: string, message: string, type: "success" | "danger", sessionId?: string) {
-    await resources.devices.sendDeviceData(deviceId, {
+    await withRateLimitRetry(() => resources.devices.sendDeviceData(deviceId, {
         variable: "validation",
         value: message,
         metadata: {
@@ -114,10 +150,10 @@ async function sendValidation(resources: any, deviceId: string, message: string,
             show_markdown: true,
             ...(sessionId ? { session_id: sessionId } : {})
         }
-    });
+    }));
 }
 
-async function syncOrganizationPlanUsage(context: any, scope: any[]) {
+async function syncOrganizationPlanUsageCore(context: any, scope: any[]) {
     context.log("Running Analysis - Sync Organization Plan Usage");
 
     if (!scope || scope.length === 0) {
@@ -137,7 +173,7 @@ async function syncOrganizationPlanUsage(context: any, scope: any[]) {
         fallbackDeviceId: inputDeviceId
     });
 
-    const organizationDevice = await resources.devices.info(organizationDeviceId);
+    const organizationDevice = await withRateLimitRetry(() => resources.devices.info(organizationDeviceId));
     const plan = getPlanFromTags(organizationDevice.tags || []) || getPlanDefinition(data.plan);
 
     if (!plan) {
@@ -154,7 +190,7 @@ async function syncOrganizationPlanUsage(context: any, scope: any[]) {
     await deleteDeviceDataByVariables(resources, inputDeviceId, ["validation"]).catch(() => 0);
 
     const status = await publishPlanStatus(resources, organizationDeviceId, plan);
-    await resources.devices.sendDeviceData(organizationDeviceId, {
+    await withRateLimitRetry(() => resources.devices.sendDeviceData(organizationDeviceId, {
         variable: "plano_sincronizado",
         value: "ok",
         metadata: {
@@ -167,7 +203,7 @@ async function syncOrganizationPlanUsage(context: any, scope: any[]) {
             organization_name: getTagValue(organizationDevice.tags, "organization_name") || organizationDevice.name,
             updated_at: new Date().toISOString()
         }
-    });
+    }));
 
     await sendValidation(
         resources,
@@ -178,6 +214,24 @@ async function syncOrganizationPlanUsage(context: any, scope: any[]) {
     );
 
     context.log(`Plan usage synchronized for organization ${organizationDeviceId}: alerts=${status.usage.alerts} reports=${status.usage.reports} deleted_stale_alert_usage=${deletedStaleAlertUsage}`);
+}
+
+async function syncOrganizationPlanUsage(context: any, scope: any[]) {
+    try {
+        await syncOrganizationPlanUsageCore(context, scope);
+    } catch (error) {
+        const message = String((error as any)?.message || error || "Erro desconhecido");
+        context.log("Failed to sync organization plan usage: " + message);
+
+        if (!scope || scope.length === 0) return;
+
+        const resources = new Resources({ token: context.token });
+        const inputDeviceId = scope[0].device;
+        const data = extractSyncPlanData(scope);
+        await sendValidation(resources, inputDeviceId, "Não foi possível sincronizar o uso do plano agora. Tente novamente em alguns instantes. Detalhe: " + message, "danger", data.session_id).catch((validationError) => {
+            context.log("Failed to send sync validation: " + validationError);
+        });
+    }
 }
 
 export { syncOrganizationPlanUsage };

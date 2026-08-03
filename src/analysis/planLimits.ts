@@ -128,6 +128,38 @@ function parseLimit(value: any, fallback: number): number {
     return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelayMs(error: any, attempt: number): number {
+    const text = String(error?.message || error || "");
+    const retryAfterMatch = text.match(/Retry-After:\s*(\d+)/i);
+    const retryAfterSeconds = retryAfterMatch ? Number(retryAfterMatch[1]) : 0;
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) return retryAfterSeconds * 1000 + 500;
+    return Math.min(30000, 1000 * Math.pow(2, attempt));
+}
+
+function isRateLimitError(error: any): boolean {
+    const text = String(error?.message || error || "").toLowerCase();
+    return text.includes("too many requests") || text.includes("retry-after") || error?.status === 429 || error?.statusCode === 429;
+}
+
+async function withRateLimitRetry<T>(operation: () => Promise<T>, attempts = 5): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+            if (!isRateLimitError(error) || attempt === attempts - 1) throw error;
+            await sleep(getRetryDelayMs(error, attempt));
+        }
+    }
+
+    throw lastError;
+}
 function parseBoolean(value: any, fallback: boolean): boolean {
     if (value === undefined || value === null || value === "") return fallback;
     const normalized = normalizeText(value);
@@ -396,7 +428,7 @@ async function deleteDeviceDataIds(resources: any, deviceId: string, ids: string
         const batch = uniqueIds.slice(index, index + 100);
         if (!batch.length) continue;
 
-        await resources.devices.deleteDeviceData(deviceId, { ids: batch });
+        await withRateLimitRetry(() => resources.devices.deleteDeviceData(deviceId, { ids: batch }));
         deleted += batch.length;
     }
 
@@ -409,12 +441,12 @@ export async function deleteDeviceDataByVariables(resources: any, deviceId: stri
     let skip = 0;
 
     while (skip < 50000) {
-        const data = await resources.devices.getDeviceData(deviceId, {
+        const data = await withRateLimitRetry<any[]>(() => resources.devices.getDeviceData(deviceId, {
             variables,
             qty,
             skip,
             ordination: "descending"
-        });
+        }));
 
         ids.push(...(data || [])
             .filter((item: any) => filter ? filter(item) : true)
@@ -433,10 +465,10 @@ export async function getOrganizationAlertSourceDeviceIds(resources: any, organi
     const ids: string[] = [];
 
     try {
-        const groupRefs = await resources.devices.getDeviceData(organizationDeviceId, {
+        const groupRefs = await withRateLimitRetry<any[]>(() => resources.devices.getDeviceData(organizationDeviceId, {
             variables: ["group_id"],
             qty: 9999
-        });
+        }));
 
         ids.push(...(groupRefs || [])
             .map((item: any) => item?.value)
@@ -447,10 +479,10 @@ export async function getOrganizationAlertSourceDeviceIds(resources: any, organi
     }
 
     try {
-        const organizationAlertRecords = await resources.devices.getDeviceData(organizationDeviceId, {
+        const organizationAlertRecords = await withRateLimitRetry<any[]>(() => resources.devices.getDeviceData(organizationDeviceId, {
             variables: ["alertas"],
             qty: 9999
-        });
+        }));
 
         ids.push(...(organizationAlertRecords || [])
             .map((item: any) => item?.metadata?.source_group_device)
@@ -467,12 +499,18 @@ export async function getOrganizationAlertSourceDeviceIds(resources: any, organi
 export async function getPlanUsage(resources: any, organizationDeviceId: string): Promise<PlanUsage> {
     const alertSourceDeviceIds = await getOrganizationAlertSourceDeviceIds(resources, organizationDeviceId);
     const periodStart = await getPlanUsagePeriodStart(resources, organizationDeviceId);
-    const [alertGroups, reports] = await Promise.all([
-        Promise.all(alertSourceDeviceIds.map((deviceId) => 
-            resources.devices.getDeviceData(deviceId, { variables: ["alertas"], qty: 9999 }).catch(() => [])
-        )),
+    const alertGroups: any[] = [];
+
+    for (const deviceId of alertSourceDeviceIds) {
+        const alerts = await withRateLimitRetry<any[]>(() =>
+            resources.devices.getDeviceData(deviceId, { variables: ["alertas"], qty: 9999 })
+        ).catch(() => []);
+        alertGroups.push(alerts || []);
+    }
+
+    const reports = await withRateLimitRetry<any[]>(() =>
         resources.devices.getDeviceData(organizationDeviceId, { variables: ["relatorios"], qty: 9999 })
-    ]);
+    ).catch(() => []);
 
     return {
         alerts: countActiveData(alertGroups.flat(), periodStart),
@@ -496,7 +534,7 @@ export async function publishPlanStatus(resources: any, organizationDeviceId: st
 
     await deleteDeviceDataByVariables(resources, organizationDeviceId, PLAN_STATUS_VARIABLES).catch(() => 0);
 
-    await resources.devices.sendDeviceData(organizationDeviceId, [
+    await withRateLimitRetry(() => resources.devices.sendDeviceData(organizationDeviceId, [
         {
             variable: "plano_status",
             value: plan.label,
@@ -582,7 +620,7 @@ export async function publishPlanStatus(resources: any, organizationDeviceId: st
                 updated_at: now
             }
         }
-    ]);
+    ]));
 
     return { plan, usage, remaining };
 }

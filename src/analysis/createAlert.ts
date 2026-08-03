@@ -44,7 +44,7 @@ function getVariableLabel(variable: string): string {
 }
 
 function createAlertUid(): string {
-    return `alert_1785526449221_aws4i3t1`;
+    return `alert_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 async function createAlert(context: any, scope: any[]) {

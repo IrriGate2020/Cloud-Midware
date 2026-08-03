@@ -36,7 +36,7 @@ function getVariableLabel(variable: string): string {
 }
 
 function createAlertUid(): string {
-    return `alert_1785526449983_qudmkhis`;
+    return `alert_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 async function createAlertCentral(context: any, scope: any[]) {
