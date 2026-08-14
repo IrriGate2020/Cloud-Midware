@@ -168,19 +168,12 @@ function parseBoolean(value: any, fallback: boolean): boolean {
     return fallback;
 }
 
-function getDeviceRetentionConfig(retentionDays: number): { chunk_period: "day" | "month"; chunk_retention: number } {
+function getDeviceRetentionConfig(retentionDays: number): { chunk_period: "week"; chunk_retention: number } {
     const days = Math.max(1, Math.floor(Number(retentionDays) || 1));
 
-    if (days > 36) {
-        return {
-            chunk_period: "month",
-            chunk_retention: Math.max(1, Math.ceil(days / 30))
-        };
-    }
-
     return {
-        chunk_period: "day",
-        chunk_retention: days
+        chunk_period: "week",
+        chunk_retention: Math.min(26, Math.max(1, Math.ceil(days / 7)))
     };
 }
 
