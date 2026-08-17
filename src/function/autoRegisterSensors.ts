@@ -44,7 +44,7 @@ const SENSOR_TYPES_BY_MOD: Record<number, string> = {
     1: "nutrition",
     2: "nutrition_2",
     4: "illumination",
-    5: "climate",
+    5: "sht",
     6: "climate"
 };
 
@@ -53,11 +53,13 @@ const SENSOR_LABELS: Record<string, string> = {
     nutrition: "Nutrição",
     nutrition_2: "Nutrição 2",
     illumination: "Iluminação",
-    climate: "Clima"
+    sht: "SHT",
+    climate: "ClimaPrime"
 };
 
 const SENSOR_LABELS_BY_MOD: Record<number, string> = {
-    6: "Climaprime"
+    5: "SHT",
+    6: "ClimaPrime"
 };
 
 function normalizeTagKey(value: any): string {
@@ -150,6 +152,7 @@ async function configureDashboardUrl(
         nutrition: ["nutrition"],
         nutrition_2: ["nutrition_2"],
         illumination: ["illumination"],
+        sht: ["climate"],
         climate: ["climate"]
     };
 
@@ -415,11 +418,11 @@ async function registerSensorDevice(
         const devMode = autoValue === 5 ? "monitoring" : "automation";
 
         // Define o tipo de sensor baseado no MOD.
-        // MOD 6 representa o sensor Climaprime.
+        // MOD 5 representa SHT; MOD 6 representa ClimaPrime.
         const sensorMod = Number(sensorConfig.MOD);
         const sensorType = SENSOR_TYPES_BY_MOD[sensorMod] || "irrigation";
         const sensorLabel = SENSOR_LABELS_BY_MOD[sensorMod] || SENSOR_LABELS[sensorType] || "Sensor";
-        const applicationLabel = sensorMod === 6 ? "UTC - ClimaPrime" : `UTC - ${sensorLabel}`;
+        const applicationLabel = sensorMod === 5 ? "SHT - Climatização" : sensorMod === 6 ? "ClimaPrime - Climatização" : "UTC - " + sensorLabel;
         const sensorDeviceName = `${sensorLabel} ${sensorNumber} - Central ${centralSN}`;
         const retentionConfig = getDeviceRetentionConfig(retentionDays);
         const retentionLabel = formatRetentionConfig(retentionDays);
@@ -554,6 +557,7 @@ async function registerSensorDevice(
                     'nutrition': ['nutrition'],
                     'nutrition_2': ['nutrition_2'],
                     'illumination': ['illumination'],
+                    'sht': ['climate'],
                     'climate': ['climate']
                 };
 
